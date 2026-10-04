@@ -1,0 +1,71 @@
+name: banking
+display_name: Bank Staff Assistant
+roles: [teller, customer_service, credit_officer, branch_manager]
+audiences: [staff, customer]
+caller_attributes: [branch]
+default_feature: policy_qa
+policy: packs.banking.policy.rules
+
+mcp_servers:
+  - platform: documents
+  - pack: transactions
+  - pack: services
+
+classifications:
+  - {label: public, roles: all}
+  - {label: internal, roles: [teller, customer_service, credit_officer, branch_manager]}
+
+features:
+  - id: policy_qa
+    template: document_qa
+    title: Policy and procedure Q&A
+    description: Questions about bank policy, procedures, KYC and compliance rules.
+    prompt: prompts/policy_qa.md
+    tools: [documents.search]
+  - id: product_lookup
+    template: record_lookup
+    title: Product lookup
+    description: Rates, fees, eligibility and required documents for a bank product.
+    prompt: prompts/product_lookup.md
+    tools: [services.search_products, services.get_product]
+  - id: transaction_lookup
+    template: record_lookup
+    title: Transaction lookup
+    description: Account activity, recent debits or credits, why a transfer failed.
+    prompt: prompts/transaction_lookup.md
+    tools: [transactions.list, transactions.get_status]
+  - id: code_explainer
+    template: document_qa
+    title: Error and status code explainer
+    description: Meaning of a banking system error or status code and the next step.
+    prompt: prompts/code_explainer.md
+    tools: [documents.search]
+  - id: form_guidance
+    template: checklist
+    title: Form and checklist guidance
+    description: Which forms, signatures and approvals a request needs.
+    prompt: prompts/form_guidance.md
+    tools: [services.get_requirements, documents.search]
+  - id: troubleshooting
+    template: guided_playbook
+    title: Guided troubleshooting
+    description: Step-by-step help for a blocked card, dormant account or failed transfer.
+    prompt: prompts/troubleshooting.md
+  - id: document_summary_extraction
+    template: document_extraction
+    title: Document summarisation and extraction
+    description: Summarise a circular or pull key fields from an uploaded document.
+    prompt: prompts/document_summary_extraction.md
+    tools: [documents.get]
+  - id: customer_360
+    template: record_summary
+    title: Customer 360 summary
+    description: One-screen brief of a customer's accounts, activity and open requests.
+    prompt: prompts/customer_360.md
+    tools: [services.customer_summary]
+    roles: [customer_service, credit_officer, branch_manager]
+
+extraction_schemas:
+  - {type: id_card, fields: [full_name, id_number, date_of_birth, expiry_date]}
+  - {type: payslip, fields: [employer, employee_name, period, gross_pay, net_pay]}
+  - {type: statement, fields: [account_holder, account_number, period_start, period_end, closing_balance]}

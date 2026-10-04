@@ -1,0 +1,9 @@
+- id: q01
+  feature: example_qa
+  role: staff_member
+  attributes: {}
+  question: "What does the handbook say about leave?"
+  expect_tool: documents.search
+  expect_contains: []
+  expect_citation: true
+  expect_denied: false

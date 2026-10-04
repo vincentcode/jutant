@@ -1,0 +1,45 @@
+# Placeholder: step content must come from the bank's procedures.
+id: blocked_card
+title: Blocked card
+description: Customer reports that their card is blocked or declined.
+steps:
+  - order: 1
+    title: Verify the customer
+    instruction: Confirm the customer's identity using two KYC questions.
+    audience: [staff]
+    expects: confirm
+  - order: 2
+    title: Find the block reason
+    instruction: Check the card status and tell me which reason is shown.
+    audience: [staff]
+    expects: choice
+    choices: [wrong_pin, fraud_hold, expired, other]
+    next_on: {wrong_pin: 3, fraud_hold: 4, expired: 5, other: 6}
+  - order: 3
+    title: Reset the PIN counter
+    instruction: Reset the PIN counter and ask the customer to retry.
+    audience: [staff, customer]
+    expects: confirm
+    next_on: {confirm: 7}
+  - order: 4
+    title: Refer to fraud
+    instruction: Do not unblock the card. Refer the case to the fraud team.
+    audience: [staff]
+    expects: confirm
+    next_on: {confirm: 7}
+  - order: 5
+    title: Order a replacement
+    instruction: Raise a replacement card request.
+    audience: [staff, customer]
+    expects: confirm
+    next_on: {confirm: 7}
+  - order: 6
+    title: Escalate
+    instruction: Escalate to card operations with the status shown.
+    audience: [staff]
+    expects: confirm
+  - order: 7
+    title: Close
+    instruction: Confirm the outcome with the customer.
+    audience: [staff, customer]
+    expects: none

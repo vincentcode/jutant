@@ -1,0 +1,75 @@
+name: jutant
+
+x-python: &python
+  build:
+    context: ../backend
+  env_file: ../backend/.env
+  depends_on:
+    db:
+      condition: service_healthy
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: jutant
+      POSTGRES_USER: jutant
+      POSTGRES_PASSWORD: jutant
+    volumes: [pgdata:/var/lib/postgresql/data]
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jutant"]
+      interval: 5s
+      retries: 10
+
+  ollama:
+    build:
+      context: ollama
+    volumes: [ollama:/root/.ollama]
+    ports: ["11434:11434"]
+
+  migrate:
+    <<: *python
+    command: python manage.py migrate --noinput
+    restart: "no"
+
+  api:
+    <<: *python
+    command: uvicorn api.main:create_app --factory --host 0.0.0.0 --port 8000
+    ports: ["8000:8000"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      ollama: {condition: service_started}
+      mcp-documents: {condition: service_started}
+      mcp-transactions: {condition: service_started}
+      mcp-services: {condition: service_started}
+
+  mcp-documents:
+    <<: *python
+    command: python -m mcp_servers.documents.server
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+
+  mcp-transactions:
+    <<: *python
+    command: python -m packs.banking.mcp_servers.transactions.server
+
+  mcp-services:
+    <<: *python
+    command: python -m packs.banking.mcp_servers.services.server
+
+  worker:
+    <<: *python
+    command: python manage.py ingest_documents /data/documents --doc-type policy --classification internal
+    profiles: [ingest]
+    volumes: [../data:/data]
+
+  web:
+    build:
+      context: ../web
+    ports: ["8080:80"]
+    depends_on: [api]
+
+volumes:
+  pgdata:
+  ollama:

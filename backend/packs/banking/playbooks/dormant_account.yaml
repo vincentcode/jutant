@@ -1,0 +1,20 @@
+# Placeholder: step content must come from the bank's procedures.
+id: dormant_account
+title: Dormant account
+description: Customer wants to use or reactivate a dormant account.
+steps:
+  - order: 1
+    title: Verify the customer
+    instruction: Confirm the customer's identity with a valid ID.
+    audience: [staff]
+    expects: confirm
+  - order: 2
+    title: Collect the reactivation form
+    instruction: Ask the customer to complete the reactivation form.
+    audience: [staff, customer]
+    expects: confirm
+  - order: 3
+    title: Get approval
+    instruction: Submit the form for branch manager approval.
+    audience: [staff]
+    expects: confirm

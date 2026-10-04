@@ -1,0 +1,24 @@
+name: example
+display_name: Example Assistant
+roles: [staff_member, supervisor]
+audiences: [staff]
+caller_attributes: [team]
+default_feature: example_qa
+policy: packs.example.policy.rules
+
+mcp_servers:
+  - platform: documents
+
+classifications:
+  - {label: internal, roles: all}
+
+features:
+  - id: example_qa
+    template: document_qa
+    title: Example Q&A
+    description: Questions answered from the area's documents.
+    prompt: prompts/example_qa.md
+    tools: [documents.search]
+
+field_rules: []
+extraction_schemas: []

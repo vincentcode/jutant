@@ -1,0 +1,4 @@
+# Mirrors `extraction_schemas` in pack.yaml; kept here for operations staff to review.
+- {type: id_card, fields: [full_name, id_number, date_of_birth, expiry_date]}
+- {type: payslip, fields: [employer, employee_name, period, gross_pay, net_pay]}
+- {type: statement, fields: [account_holder, account_number, period_start, period_end, closing_balance]}

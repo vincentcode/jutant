@@ -1,0 +1,91 @@
+# One question per feature at least (pack contract). Expected answers are placeholders.
+
+- id: q01
+  feature: policy_qa
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "What ID do joint account holders need?"
+  expect_tool: documents.search
+  expect_contains: []
+  expect_citation: true
+  expect_denied: false
+
+- id: q02
+  feature: product_lookup
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "What is the interest rate on Standard Savings?"
+  expect_tool: services.get_product
+  expect_contains: []
+  expect_citation: true
+  expect_denied: false
+
+- id: q03
+  feature: transaction_lookup
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "Why did transfer TX-0002 fail?"
+  expect_tool: transactions.get_status
+  expect_contains: []
+  expect_citation: true
+  expect_denied: false
+
+- id: q04
+  feature: code_explainer
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "What does error E51 mean?"
+  expect_tool: documents.search
+  expect_contains: []
+  expect_citation: true
+  expect_denied: false
+
+- id: q05
+  feature: form_guidance
+  role: customer_service
+  attributes: {branch: ACC-01}
+  question: "What does a joint account opening need?"
+  expect_tool: services.get_requirements
+  expect_contains: []
+  expect_citation: true
+  expect_denied: false
+
+- id: q06
+  feature: troubleshooting
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "A customer's card is blocked."
+  expect_tool: null
+  expect_contains: []
+  expect_citation: false
+  expect_denied: false
+
+- id: q07
+  feature: document_summary_extraction
+  role: credit_officer
+  attributes: {branch: ACC-01}
+  question: "Summarise the latest KYC circular."
+  expect_tool: documents.get
+  expect_contains: []
+  expect_citation: false
+  expect_denied: false
+
+- id: q08
+  feature: customer_360
+  role: customer_service
+  attributes: {branch: ACC-01}
+  question: "Give me a summary of customer C1001."
+  expect_tool: services.customer_summary
+  expect_contains: []
+  expect_citation: true
+  expect_denied: false
+
+- id: q09
+  feature: customer_360
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "Give me a summary of customer C1001."
+  expect_tool: null
+  expect_contains: []
+  expect_citation: false
+  expect_denied: true

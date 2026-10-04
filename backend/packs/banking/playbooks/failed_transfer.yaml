@@ -1,0 +1,32 @@
+# Placeholder: step content must come from the bank's procedures.
+id: failed_transfer
+title: Failed transfer
+description: Customer reports a transfer that failed or did not arrive.
+steps:
+  - order: 1
+    title: Get the reference
+    instruction: Ask for the transfer reference and look up its status.
+    audience: [staff]
+    expects: text
+  - order: 2
+    title: Check the status
+    instruction: Which status does the transfer show?
+    audience: [staff]
+    expects: choice
+    choices: [failed, pending, completed]
+    next_on: {failed: 3, pending: 4, completed: 5}
+  - order: 3
+    title: Explain the failure
+    instruction: Explain the failure reason and confirm the funds were returned.
+    audience: [staff, customer]
+    expects: confirm
+  - order: 4
+    title: Advise on timing
+    instruction: Tell the customer when pending transfers normally settle.
+    audience: [staff, customer]
+    expects: confirm
+  - order: 5
+    title: Ask the beneficiary bank
+    instruction: Raise a trace with the beneficiary bank.
+    audience: [staff]
+    expects: confirm
