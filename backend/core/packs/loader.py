@@ -14,7 +14,7 @@ import yaml
 
 from core.packs.manifest import PackManifest
 from core.policy.rules import FieldRule, Rule
-from core.types import Feature, Playbook, PlaybookStep
+from core.types import ArgumentSource, Feature, Playbook, PlaybookStep, Prefetch
 
 SYSTEM_PROMPT = "prompts/system.md"
 
@@ -53,6 +53,18 @@ def load_pack(path: str | Path) -> Pack:
             prompt=_read_text(root / f.prompt),
             tools=tuple(f.tools),
             roles=tuple(f.roles),
+            route_patterns=tuple(f.route.patterns),
+            route_examples=tuple(f.route.examples),
+            prefetch=tuple(
+                Prefetch(
+                    p.tool,
+                    {
+                        name: ArgumentSource(a.question, a.match, a.value)
+                        for name, a in p.arguments.items()
+                    },
+                )
+                for p in f.prefetch
+            ),
         )
         for f in manifest.features
     )

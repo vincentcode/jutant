@@ -18,3 +18,15 @@ class Staff(models.Model):
 
     def __str__(self) -> str:
         return f"{self.staff_number} ({self.role})"
+
+
+class LoginAttempt(models.Model):
+    """One sign-in attempt, kept to limit password guessing. Old rows can be deleted freely."""
+
+    username = models.CharField(max_length=150, db_index=True)  # as typed, lower-cased
+    ip = models.GenericIPAddressField(null=True, blank=True)
+    succeeded = models.BooleanField()
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["ip", "created_at"])]

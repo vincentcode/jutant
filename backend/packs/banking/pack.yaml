@@ -15,55 +15,127 @@ classifications:
   - {label: public, roles: all}
   - {label: internal, roles: [teller, customer_service, credit_officer, branch_manager]}
 
+# Routing: `route.patterns` send a question straight to a feature when exactly one feature's
+# pattern matches; `route.examples` are matched by meaning. Neither may copy the eval
+# questions, or the evals would measure memory rather than routing.
+# `prefetch`: tool calls made before the model is asked, when the question supplies every
+# argument. Patterns are case-sensitive; start one with (?i) to ignore case.
+
 features:
   - id: policy_qa
     template: document_qa
     title: Policy and procedure Q&A
-    description: Questions about bank policy, procedures, KYC and compliance rules.
+    description: "Rules in the bank's policies and procedures: what ID or documents a customer must provide, KYC, account rules, compliance."
     prompt: prompts/policy_qa.md
     tools: [documents.search]
+    route:
+      examples:
+        # Not "...to open a savings account": with a product named, the question is the
+        # product's own requirements, and that example drew one to policy_qa at 0.88.
+        - "What identification does the bank accept from a new customer?"
+        - "Is a voter ID accepted as proof of identity?"
+        - "How recent must a utility bill be for proof of address?"
+        - "What are the KYC rules for foreign nationals?"
+    prefetch:
+      - tool: documents.search
+        arguments: {query: {question: true}}
   - id: product_lookup
     template: record_lookup
     title: Product lookup
-    description: Rates, fees, eligibility and required documents for a bank product.
+    description: "Facts about a named bank product: its interest rate, fees, eligibility and required documents."
     prompt: prompts/product_lookup.md
     tools: [services.search_products, services.get_product]
+    route:
+      patterns: ['\b[A-Z]{3}-[A-Z]{3}\b']
+      examples:
+        - "What does the Premium Current account charge per month?"
+        - "Who can open a Fixed Deposit?"
+        - "What paperwork does the Premium Current account require?"
+        - "What rate does the youth savings product pay?"
+    prefetch:
+      - tool: services.get_product
+        arguments: {product_code: {match: '\b([A-Z]{3}-[A-Z]{3})\b'}}
   - id: transaction_lookup
     template: record_lookup
     title: Transaction lookup
-    description: Account activity, recent debits or credits, why a transfer failed.
+    description: "One account's transactions, or one transfer by its reference: activity, status, why it failed."
     prompt: prompts/transaction_lookup.md
     tools: [transactions.list, transactions.get_status]
+    route:
+      patterns: ['(?i)\bTX-\d+\b', '\b\d{10}\b']
+      examples:
+        - "Has the salary been credited to this account yet?"
+        - "What is the status of the transfer the customer made yesterday?"
+        - "List the recent debits on the customer's account."
+    prefetch:
+      - tool: transactions.get_status
+        arguments: {reference: {match: '(?i)\b(TX-\d+)\b'}}
+      - tool: transactions.list
+        arguments: {account_number: {match: '\b(\d{10})\b'}}
   - id: code_explainer
     template: document_qa
     title: Error and status code explainer
-    description: Meaning of a banking system error or status code and the next step.
+    description: "What a system error or status code (such as E51) means and what to do next."
     prompt: prompts/code_explainer.md
     tools: [documents.search]
+    route:
+      patterns: ['\b[A-Z]\d{2,3}\b']
+      examples:
+        - "The terminal shows a decline code, what does it mean?"
+        - "What should I do when the system shows insufficient funds?"
+    prefetch:
+      - tool: documents.search
+        arguments: {query: {match: '\b([A-Z]\d{2,3})\b'}}
   - id: form_guidance
     template: checklist
     title: Form and checklist guidance
-    description: Which forms, signatures and approvals a request needs.
+    description: "Which application forms, signatures and approvals a request needs before it can be submitted."
     prompt: prompts/form_guidance.md
     tools: [services.get_requirements, documents.search]
+    route:
+      examples:
+        - "What paperwork is needed to add a signatory to an account?"
+        - "Who has to approve a cheque book request?"
+        - "Which form do I use to change a customer's address?"
   - id: troubleshooting
     template: guided_playbook
     title: Guided troubleshooting
-    description: Step-by-step help for a blocked card, dormant account or failed transfer.
+    description: "Step-by-step help to fix a customer's problem: a blocked card, a dormant account, a failed transfer."
     prompt: prompts/troubleshooting.md
+    route:
+      examples:
+        - "The customer's card was declined at the ATM, help me sort it out."
+        - "How do I reactivate a dormant account? Take me through it."
+        - "A customer says their transfer never arrived. What do I do?"
   - id: document_summary_extraction
     template: document_extraction
     title: Document summarisation and extraction
-    description: Summarise a circular or pull key fields from an uploaded document.
+    description: "Summarise a circular or other document, or read the fields of an uploaded file."
     prompt: prompts/document_summary_extraction.md
-    tools: [documents.get]
+    tools: [documents.search, documents.get]
+    route:
+      # Embeddings match a topic, not an intent: "summarise the circular on dormant accounts"
+      # scored closest to troubleshooting's dormant-account example. The words decide instead.
+      patterns: ['(?i)\bsummari[sz]e\b', '(?i)\b(circular|memo)\b']
+      examples:
+        - "Give me the key points of the latest circular on cash limits."
+        - "Read the details from this payslip."
+        - "What does the new memo on overdrafts change?"
   - id: customer_360
     template: record_summary
     title: Customer 360 summary
-    description: One-screen brief of a customer's accounts, activity and open requests.
+    description: "Overview of one customer by customer number: their accounts, balances, recent activity and open requests."
     prompt: prompts/customer_360.md
     tools: [services.customer_summary]
     roles: [customer_service, credit_officer, branch_manager]
+    route:
+      patterns: ['(?i)\bC\d{4,}\b']
+      examples:
+        - "Tell me everything about this customer's relationship with the bank."
+        - "What accounts and open requests does the customer have?"
+    prefetch:
+      - tool: services.customer_summary
+        arguments: {customer_number: {match: '(?i)\b(C\d{4,})\b'}}
 
 extraction_schemas:
   - {type: id_card, fields: [full_name, id_number, date_of_birth, expiry_date]}

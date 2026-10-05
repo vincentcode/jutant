@@ -47,6 +47,14 @@ class PlaybookRunner:
         async for event in self._show(conversation_id, state, steps, steps[0]):
             yield event
 
+    async def abandon(self, caller: Caller, conversation_id: UUID) -> None:
+        """End the conversation's run, if there is one, without finishing it."""
+        state = await self.store.get_run(conversation_id)
+        if state is None:
+            return
+        await self.store.save_run(conversation_id, replace(state, status="abandoned"))
+        await self._audit_step(caller, conversation_id, state, "abandoned")
+
     async def advance(
         self, caller: Caller, conversation_id: UUID, user_input: str
     ) -> AsyncIterator[Event]:
@@ -59,8 +67,7 @@ class PlaybookRunner:
         text = user_input.strip()
 
         if text.lower().rstrip(".!") in CANCEL_WORDS or current is None:
-            await self.store.save_run(conversation_id, replace(state, status="abandoned"))
-            await self._audit_step(caller, conversation_id, state, "abandoned")
+            await self.abandon(caller, conversation_id)
             yield TextDelta(STOPPED)
             return
 

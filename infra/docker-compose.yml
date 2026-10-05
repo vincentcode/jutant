@@ -1,12 +1,21 @@
 name: jutant
 
+# One backend image runs the API, the MCP servers and the workers.
 x-python: &python
+  image: jutant/backend:latest
   build:
     context: ../backend
   env_file: ../backend/.env
+  restart: unless-stopped
   depends_on:
     db:
       condition: service_healthy
+
+# An MCP server is healthy once its port accepts connections (the image has no curl).
+x-mcp-health: &mcp-health
+  interval: 5s
+  timeout: 3s
+  retries: 20
 
 services:
   db:
@@ -17,58 +26,108 @@ services:
       POSTGRES_PASSWORD: jutant
     volumes: [pgdata:/var/lib/postgresql/data]
     ports: ["5432:5432"]
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U jutant"]
       interval: 5s
       retries: 10
 
+  # The model. Skip it with `--scale ollama=0` where the model runs elsewhere (a GPU host,
+  # a hosted provider) or the machine cannot hold it; set JUTANT_LLM_BASE_URL to match.
   ollama:
     build:
       context: ollama
     volumes: [ollama:/root/.ollama]
     ports: ["11434:11434"]
+    restart: unless-stopped
 
+  # Runs once per start: database migrations, then the pack's playbooks (existing ones, which
+  # operations staff may have edited in the admin, are left alone).
   migrate:
     <<: *python
-    command: python manage.py migrate --noinput
+    command: sh -c "python manage.py migrate --noinput && python manage.py load_pack_playbooks"
     restart: "no"
-
-  api:
-    <<: *python
-    command: uvicorn api.main:create_app --factory --host 0.0.0.0 --port 8000
-    ports: ["8000:8000"]
-    depends_on:
-      migrate: {condition: service_completed_successfully}
-      ollama: {condition: service_started}
-      mcp-documents: {condition: service_started}
-      mcp-transactions: {condition: service_started}
-      mcp-services: {condition: service_started}
 
   mcp-documents:
     <<: *python
     command: python -m mcp_servers.documents.server
     depends_on:
       migrate: {condition: service_completed_successfully}
+    healthcheck:
+      <<: *mcp-health
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 8101), 2)"]
 
   mcp-transactions:
     <<: *python
     command: python -m packs.banking.mcp_servers.transactions.server
+    healthcheck:
+      <<: *mcp-health
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 8102), 2)"]
 
   mcp-services:
     <<: *python
     command: python -m packs.banking.mcp_servers.services.server
+    healthcheck:
+      <<: *mcp-health
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 8103), 2)"]
 
+  # A stand-in for the bank's systems, serving the fake bank over HTTP, to run the real
+  # clients (JUTANT_BANKING_ADAPTERS=real) before the bank is reachable. Start it with
+  #   docker compose -f infra/docker-compose.yml --profile mock-bank up -d
+  # and point JUTANT_CORE_BANKING_URL and JUTANT_SERVICE_CATALOG_URL at http://mock-bank:8190.
+  mock-bank:
+    <<: *python
+    command: python -m packs.banking.mock_bank
+    profiles: [mock-bank]
+    depends_on: {}
+    healthcheck:
+      <<: *mcp-health
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 8190), 2)"]
+
+  # The API connects to every MCP server and checks the pack at start-up, so it waits for them.
+  # Reached only through the web container's nginx (port 8080), whose X-Forwarded-For it trusts
+  # for sign-in limits. Its port is not published: a client reaching it directly could claim
+  # any address.
+  api:
+    <<: *python
+    command: uvicorn api.main:create_app --factory --host 0.0.0.0 --port 8000
+    environment:
+      JUTANT_TRUSTED_PROXIES: 172.16.0.0/12  # Docker's network range for this project
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      mcp-documents: {condition: service_healthy}
+      mcp-transactions: {condition: service_healthy}
+      mcp-services: {condition: service_healthy}
+      ollama: {condition: service_started, required: false}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 8000), 2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Deletes uploads and sign-in attempts past their retention periods, every six hours.
+  housekeeping:
+    <<: *python
+    command: sh -c "while true; do python manage.py purge_expired; sleep 21600; done"
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+
+  # Ingests the documents in ../data/documents. Run on demand:
+  #   docker compose -f infra/docker-compose.yml run --rm worker
   worker:
     <<: *python
-    command: python manage.py ingest_documents /data/documents --doc-type policy --classification internal
+    command: python manage.py ingest_documents /data/documents --doc-type policy --classification internal --recursive
     profiles: [ingest]
+    restart: "no"
     volumes: [../data:/data]
 
   web:
     build:
       context: ../web
     ports: ["8080:80"]
-    depends_on: [api]
+    restart: unless-stopped
+    depends_on:
+      api: {condition: service_healthy}
 
 volumes:
   pgdata:

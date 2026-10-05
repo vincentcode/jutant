@@ -181,3 +181,56 @@ def test_extraction_feature_needs_a_schema(pack_root: Path) -> None:
 def test_every_feature_needs_an_eval_question(pack_root: Path) -> None:
     found = violations(pack_root, questions=[{"id": "q1", "feature": "qa"}])
     assert found == ["feature lookup has no eval question"]
+
+
+SEARCH_SPECS = [
+    ToolSpec("documents.search", "", {"type": "object", "properties": {"query": {}}}),
+    ToolSpec("records.get", "", {"type": "object"}),
+]
+
+
+def test_routing_and_prefetch_load(pack_root: Path) -> None:
+    manifest = with_feature(
+        route={"patterns": [r"\bQ-\d+\b"], "examples": ["What is the rule?"]},
+        prefetch=[{"tool": "documents.search", "arguments": {"query": {"question": True}}}],
+    )
+    pack = load_pack(write_pack(pack_root, manifest=manifest))
+    assert check(pack, SEARCH_SPECS) == []
+    qa = pack.features[0]
+    assert qa.route_patterns == (r"\bQ-\d+\b",) and qa.route_examples == ("What is the rule?",)
+    assert qa.prefetch[0].tool == "documents.search"
+    assert qa.prefetch[0].arguments["query"].question is True
+
+
+def test_route_patterns_must_be_valid(pack_root: Path) -> None:
+    found = violations(pack_root, manifest=with_feature(route={"patterns": ["(unclosed"]}))
+    assert any(p.startswith("feature qa: route pattern '(unclosed'") for p in found)
+
+
+@pytest.mark.parametrize(
+    ("prefetch", "problem"),
+    [
+        (
+            {"tool": "records.get", "arguments": {"query": {"question": True}}},
+            "feature qa: prefetch records.get: the feature's tools do not include it",
+        ),
+        (
+            {"tool": "documents.search", "arguments": {"q": {"question": True}}},
+            "feature qa: prefetch documents.search: the tool takes no argument q",
+        ),
+        (
+            {"tool": "documents.search", "arguments": {"query": {"match": r"(A)(B)"}}},
+            "feature qa: prefetch documents.search: argument query: has 2 groups; use at most 1",
+        ),
+    ],
+    ids=["tool outside the feature", "unknown argument", "two groups"],
+)
+def test_prefetch_must_fit_the_feature_and_tool(pack_root: Path, prefetch, problem) -> None:
+    found = violations(pack_root, SEARCH_SPECS, manifest=with_feature(prefetch=[prefetch]))
+    assert problem in found
+
+
+def test_a_prefetch_argument_has_exactly_one_source(pack_root: Path) -> None:
+    prefetch = {"tool": "documents.search", "arguments": {"query": {"question": True, "value": 1}}}
+    with pytest.raises(ValueError, match="exactly one"):
+        load_pack(write_pack(pack_root, manifest=with_feature(prefetch=[prefetch])))

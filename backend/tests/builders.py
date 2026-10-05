@@ -136,7 +136,7 @@ class Rig:
 
 async def make_rig(
     model: FakeModel | None = None,
-    results: dict[str, ToolResult] | None = None,
+    results: dict[str, Any] | None = None,
     specs: list[ToolSpec] | None = None,
     features: tuple[Feature, ...] = FEATURES,
     playbooks: list[Playbook] | None = None,

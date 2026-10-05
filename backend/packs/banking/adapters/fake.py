@@ -1,6 +1,9 @@
 """In-memory fakes with seed data. Used by development, tests and evals."""
 
+import re
 from typing import Any
+
+from packs.banking.adapters.base import NotFound
 
 CUSTOMERS = {
     "C1001": {"customer_number": "C1001", "name": "Ama Mensah", "branch": "ACC-01", "flags": []},
@@ -19,6 +22,15 @@ ACCOUNTS = {
         "type": "current",
         "currency": "GHS",
         "balance": "4520.75",
+        "status": "active",
+    },
+    "0011223355": {
+        "account_number": "0011223355",
+        "customer_number": "C1001",
+        "branch": "ACC-01",
+        "type": "savings",
+        "currency": "GHS",
+        "balance": "1500.50",
         "status": "active",
     },
     "0099887766": {
@@ -65,6 +77,28 @@ TRANSACTIONS = [
         "failure_code": None,
         "failure_reason": None,
     },
+    {
+        "reference": "TX-0004",
+        "account_number": "0011223355",
+        "date": "2026-09-15",
+        "amount": "500.00",
+        "direction": "credit",
+        "narration": "Transfer from current account",
+        "status": "completed",
+        "failure_code": None,
+        "failure_reason": None,
+    },
+    {
+        "reference": "TX-0005",
+        "account_number": "0099887766",
+        "date": "2025-01-10",
+        "amount": "-40.00",
+        "direction": "debit",
+        "narration": "Account maintenance fee",
+        "status": "completed",
+        "failure_code": None,
+        "failure_reason": None,
+    },
 ]
 PRODUCTS = {
     "SAV-STD": {
@@ -97,10 +131,6 @@ OPEN_REQUESTS = {
 }
 
 
-class NotFound(LookupError):
-    pass
-
-
 class FakeCoreBanking:
     async def get_account(self, account_number: str) -> dict[str, Any]:
         if account_number not in ACCOUNTS:
@@ -108,6 +138,8 @@ class FakeCoreBanking:
         return dict(ACCOUNTS[account_number])
 
     async def list_transactions(self, account_number: str, **filters: Any) -> list[dict[str, Any]]:
+        if account_number not in ACCOUNTS:
+            raise NotFound(account_number)
         rows = [t for t in TRANSACTIONS if t["account_number"] == account_number]
         if direction := filters.get("direction"):
             rows = [t for t in rows if t["direction"] == direction]
@@ -138,12 +170,16 @@ class FakeCoreBanking:
 
 class FakeServiceCatalog:
     async def search_products(self, query: str) -> list[dict[str, Any]]:
-        q = query.lower()
-        return [
-            {"code": p["code"], "name": p["name"]}
-            for p in PRODUCTS.values()
-            if q in p["name"].lower() or q in p["code"].lower()
-        ]
+        """Products sharing a word with the query, best match first, as a catalogue search would:
+        "Business Current account" finds Business Current."""
+        words = set(re.findall(r"[a-z0-9]+", query.lower())) - {"account", "the", "a"}
+        scored = []
+        for p in PRODUCTS.values():
+            names = set(re.findall(r"[a-z0-9]+", f"{p['name']} {p['code']}".lower()))
+            if overlap := len(words & names):
+                scored.append((overlap, p))
+        scored.sort(key=lambda item: -item[0])
+        return [{"code": p["code"], "name": p["name"]} for _, p in scored]
 
     async def get_product(self, code: str) -> dict[str, Any]:
         if code not in PRODUCTS:

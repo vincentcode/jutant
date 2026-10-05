@@ -1,4 +1,11 @@
-# One question per feature at least (pack contract). Expected answers are placeholders.
+# Eval questions for the banking pack (at least one per feature, the pack contract requires).
+#
+# Answers are checked against the fake bank (packs/banking/adapters/fake.py) and the sample
+# documents in evals/documents/. Each question is asked with no feature picked, so routing is
+# measured too. Run: python manage.py run_evals
+#
+# expect_contains phrases are matched ignoring case; keep them to facts any correct answer must
+# state, not wording.
 
 - id: q01
   feature: policy_qa
@@ -6,86 +13,256 @@
   attributes: {branch: ACC-01}
   question: "What ID do joint account holders need?"
   expect_tool: documents.search
-  expect_contains: []
+  expect_contains: ["proof of address"]
   expect_citation: true
-  expect_denied: false
 
 - id: q02
+  feature: policy_qa
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "What does a minor need to open an account?"
+  expect_tool: documents.search
+  expect_contains: ["birth certificate"]
+  expect_citation: true
+
+- id: q03
   feature: product_lookup
   role: teller
   attributes: {branch: ACC-01}
   question: "What is the interest rate on Standard Savings?"
   expect_tool: services.get_product
-  expect_contains: []
+  expect_contains: ["8.5"]
   expect_citation: true
-  expect_denied: false
 
-- id: q03
+- id: q04
+  feature: product_lookup
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "What is the monthly fee on the Business Current account?"
+  expect_tool: services.get_product
+  expect_contains: ["25"]
+  expect_citation: true
+
+- id: q05
   feature: transaction_lookup
   role: teller
   attributes: {branch: ACC-01}
   question: "Why did transfer TX-0002 fail?"
   expect_tool: transactions.get_status
-  expect_contains: []
+  expect_contains: ["closed"]
   expect_citation: true
-  expect_denied: false
 
-- id: q04
+- id: q06
+  feature: transaction_lookup
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "Show the last two transactions on account 0011223344."
+  expect_tool: transactions.list
+  expect_contains: ["TX-0003"]
+  expect_citation: true
+
+- id: q07
+  feature: transaction_lookup
+  role: teller
+  attributes: {branch: KSI-02}
+  question: "Show the recent transactions on account 0011223344."
+  expect_denied: true  # the account belongs to another branch
+
+- id: q08
   feature: code_explainer
   role: teller
   attributes: {branch: ACC-01}
-  question: "What does error E51 mean?"
+  question: "What does payment error code E51 mean?"
   expect_tool: documents.search
-  expect_contains: []
+  expect_contains: ["closed"]
   expect_citation: true
-  expect_denied: false
 
-- id: q05
+- id: q09
   feature: form_guidance
   role: customer_service
   attributes: {branch: ACC-01}
-  question: "What does a joint account opening need?"
+  question: "What forms and signatures does a joint account opening need?"
   expect_tool: services.get_requirements
-  expect_contains: []
+  expect_contains: ["joint mandate"]
   expect_citation: true
-  expect_denied: false
 
-- id: q06
+- id: q10
   feature: troubleshooting
   role: teller
   attributes: {branch: ACC-01}
-  question: "A customer's card is blocked."
-  expect_tool: null
-  expect_contains: []
+  question: "A customer's card is blocked. Walk me through it."
   expect_citation: false
-  expect_denied: false
 
-- id: q07
+- id: q11
   feature: document_summary_extraction
   role: credit_officer
   attributes: {branch: ACC-01}
-  question: "Summarise the latest KYC circular."
+  question: "Summarise circular 14/2026 on dormant account reactivation."
   expect_tool: documents.get
-  expect_contains: []
+  expect_contains: ["november"]
   expect_citation: false
-  expect_denied: false
 
-- id: q08
+- id: q12
   feature: customer_360
   role: customer_service
   attributes: {branch: ACC-01}
   question: "Give me a summary of customer C1001."
   expect_tool: services.customer_summary
-  expect_contains: []
+  expect_contains: ["Ama Mensah"]
   expect_citation: true
-  expect_denied: false
 
-- id: q09
+- id: q13
   feature: customer_360
   role: teller
   attributes: {branch: ACC-01}
   question: "Give me a summary of customer C1001."
-  expect_tool: null
-  expect_contains: []
+  expect_denied: true  # tellers may not use the customer summary
+
+# --- second set: other phrasings, more refusals, and "nothing invented" ---------------------
+
+- id: q14
+  feature: policy_qa
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "How old can a customer's proof of address be?"
+  expect_tool: documents.search
+  expect_contains: ["three months"]
+  expect_citation: true
+
+- id: q15
+  feature: policy_qa
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "Who opens an account for a customer under 18?"
+  expect_tool: documents.search
+  expect_contains: ["guardian"]
+  expect_citation: true
+
+- id: q16
+  feature: product_lookup
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "Who is eligible for the Business Current account?"
+  expect_tool: services.get_product
+  expect_contains: ["registered businesses"]
+  expect_citation: true
+
+- id: q17
+  feature: product_lookup
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "Which documents are required for Standard Savings?"
+  expect_tool: services.get_product
+  expect_contains: ["proof of address"]
+  expect_citation: true
+
+- id: q18
+  feature: transaction_lookup
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "Show the credits on account 0011223355."
+  expect_tool: transactions.list
+  expect_contains: ["TX-0004"]
+  expect_citation: true
+
+- id: q19
+  feature: transaction_lookup
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "Has transfer TX-0099 gone through?"
+  expect_tool: transactions.get_status
+  expect_contains: ["could not find"]  # no such transfer: nothing may be invented
   expect_citation: false
-  expect_denied: true
+
+- id: q20
+  feature: code_explainer
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "The payment failed with E91. What should I do?"
+  expect_tool: documents.search
+  expect_contains: ["30 minutes"]
+  expect_citation: true
+
+- id: q21
+  feature: code_explainer
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "What does E12 mean?"
+  expect_tool: documents.search
+  expect_contains: ["insufficient"]
+  expect_citation: true
+
+- id: q22
+  feature: form_guidance
+  role: customer_service
+  attributes: {branch: ACC-01}
+  question: "Who must approve a joint account opening?"
+  expect_tool: services.get_requirements
+  expect_contains: ["supervisor"]
+  expect_citation: true
+
+- id: q23
+  feature: form_guidance
+  role: customer_service
+  attributes: {branch: ACC-01}
+  question: "What signatures are needed to open a joint account?"
+  expect_tool: services.get_requirements
+  expect_contains: ["all account holders"]
+  expect_citation: true
+
+- id: q24
+  feature: troubleshooting
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "The customer's card keeps getting declined, help me fix it."
+  expect_citation: false
+
+- id: q25
+  feature: troubleshooting
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "Take me through reactivating a dormant account."
+  expect_citation: false
+
+- id: q26
+  feature: document_summary_extraction
+  role: credit_officer
+  attributes: {branch: ACC-01}
+  question: "What does circular 14/2026 change for tellers?"
+  expect_tool: documents.get
+  expect_contains: ["any branch"]
+  expect_citation: false
+
+- id: q27
+  feature: document_summary_extraction
+  role: credit_officer
+  attributes: {branch: ACC-01}
+  question: "Summarise the KYC policy."
+  expect_tool: documents.get
+  expect_contains: ["joint"]
+  expect_citation: false
+
+- id: q28
+  feature: customer_360
+  role: credit_officer
+  attributes: {branch: ACC-01}
+  question: "What open requests does customer C1001 have?"
+  expect_tool: services.customer_summary
+  expect_contains: ["REQ-77"]
+  expect_citation: true
+
+- id: q29
+  feature: customer_360
+  role: customer_service
+  attributes: {branch: KSI-02}
+  question: "Give me an overview of customer C1002."
+  expect_tool: services.customer_summary
+  expect_contains: ["Kofi Asante"]
+  expect_citation: true
+
+- id: q30
+  feature: customer_360
+  role: customer_service
+  attributes: {branch: ACC-01}
+  question: "Give me an overview of customer C1002."
+  expect_denied: true  # the customer belongs to another branch

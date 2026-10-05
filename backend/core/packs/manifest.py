@@ -1,8 +1,8 @@
 """The shape of a pack's `pack.yaml`. A manifest that does not match fails to load."""
 
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 TemplateId = Literal[
     "document_qa",
@@ -20,6 +20,31 @@ class McpServerRef(BaseModel):
     url: str | None = None  # overrides the default address
 
 
+class RouteDef(BaseModel):
+    patterns: list[str] = []  # regular expressions; a match routes here without the model
+    examples: list[str] = []  # example questions, for routing by meaning
+
+
+class ArgumentDef(BaseModel):
+    """One argument of a prefetched call: `{question: true}`, `{match: '<regex>'}` or
+    `{value: ...}`."""
+
+    question: bool = False
+    match: str | None = None
+    value: Any = None
+
+    @model_validator(mode="after")
+    def _exactly_one(self) -> "ArgumentDef":
+        if sum((self.question, self.match is not None, self.value is not None)) != 1:
+            raise ValueError("set exactly one of question, match or value")
+        return self
+
+
+class PrefetchDef(BaseModel):
+    tool: str
+    arguments: dict[str, ArgumentDef]
+
+
 class FeatureDef(BaseModel):
     id: str
     template: TemplateId
@@ -28,6 +53,8 @@ class FeatureDef(BaseModel):
     prompt: str  # path relative to the pack
     tools: list[str] = []
     roles: list[str] = []  # empty = all roles
+    route: RouteDef = RouteDef()
+    prefetch: list[PrefetchDef] = []
 
 
 class Classification(BaseModel):

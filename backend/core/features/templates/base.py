@@ -10,10 +10,11 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 from uuid import UUID
 
-from core.errors import InvalidToolCall, UnknownTool
+from core.errors import InvalidToolCall, ModelUnavailable, UnknownTool
 from core.events import Event, Failed, TextDelta, ToolFinished, ToolStarted
+from core.features.prefetch import planned_calls
 from core.ports import AuditSink, ModelProvider, PlaybookStore
-from core.types import Caller, Feature, Message, ToolResult
+from core.types import Caller, Feature, Message, ModelReply, ToolCall, ToolResult, ToolSpec
 
 if TYPE_CHECKING:
     from core.playbooks.runner import PlaybookRunner
@@ -22,6 +23,7 @@ if TYPE_CHECKING:
 # Reasons a template can fail with; the client turns these into plain-language messages.
 STEP_LIMIT = "step_limit"
 TOOL_FAILED = "tool_failed"
+DENIED = "denied"
 MAX_TOOL_FAILURES = 2  # one failure is shown to the model so it can correct itself
 
 
@@ -53,31 +55,68 @@ class FeatureTemplate(Protocol):
 async def tool_loop(ctx: FeatureContext) -> AsyncIterator[Event]:
     """Model, tool calls, model again, until the model answers in text.
 
-    The model sees only the routed feature's tools. Every call goes through the gateway. A failed
-    call is returned to the model once so it can correct itself; a second failure ends the turn.
-    The loop stops after `max_steps` model calls.
+    The feature's prefetch calls whose arguments the question supplies are made first, in
+    code, and the model starts with their results. The model sees only the routed feature's
+    tools. Every call goes through the gateway. A failed call of the model's is returned to it
+    once so it can correct itself; a second failure ends the turn. The loop stops after
+    `max_steps` model calls.
+
+    A small model sometimes answers from memory (inventing a source) or replies with nothing,
+    without looking anything up. If its first reply calls no tool although the feature has
+    tools and nothing was prefetched, that reply is dropped and the question is asked once more
+    with an instruction to use the tools. Keeping the made-up answer in view makes the model
+    repeat it.
+
+    Replies are streamed, except one that may still be dropped that way.
+
+    A call the policy refuses ends the turn at once, as `denied`: the model cannot change who
+    the caller is, and asking it to write about the refusal would only keep staff waiting.
     """
     messages = list(ctx.messages)
     tools = ctx.gateway.catalog.specs_for(ctx.feature.tools)
+    for call in planned_calls(ctx.feature, ctx.question):
+        messages.append(Message("assistant", "", tool_calls=(call,)))
+        async for event in run_call(ctx, call):
+            yield event
+        if ctx.results[-1].error == DENIED:
+            yield Failed(DENIED)
+            return
+        messages.append(Message("tool", tool_message(ctx.results[-1]), tool_call_id=call.id))
+
     failures = 0
+    nudged = False
     for _ in range(ctx.max_steps):
-        reply = await ctx.model.chat(messages, tools)
+        may_nudge = bool(tools) and not ctx.results and not nudged
+        if may_nudge:
+            reply = await ctx.model.chat(messages, tools)
+            streamed = False
+        else:
+            reply, streamed = None, False
+            async for part in ctx.model.stream_chat(messages, tools):
+                if isinstance(part, ModelReply):
+                    reply = part
+                else:
+                    yield TextDelta(part, continues=streamed)
+                    streamed = True
+            if reply is None:
+                raise ModelUnavailable("the model's reply ended without a result")
         if not reply.tool_calls:
-            yield TextDelta((reply.text or "").strip())
+            if may_nudge:
+                nudged = True
+                question = messages[-1]  # no tool messages yet, so the question is last
+                messages[-1] = Message("user", f"{question.content}\n\n{use_tools_nudge(tools)}")
+                continue
+            if not streamed:
+                yield TextDelta((reply.text or "").strip())
             return
         messages.append(Message("assistant", reply.text or "", tool_calls=reply.tool_calls))
         for call in reply.tool_calls:
-            yield ToolStarted(call)
-            try:
-                result = await ctx.gateway.execute(
-                    ctx.caller, ctx.feature, call, str(ctx.conversation_id)
-                )
-            except (InvalidToolCall, UnknownTool) as exc:
-                result = ToolResult(
-                    call.id, ok=False, data={"problems": [str(exc)]}, error="invalid_arguments"
-                )
-            ctx.results.append(result)
-            yield ToolFinished(result)
+            async for event in run_call(ctx, call):
+                yield event
+            result = ctx.results[-1]
+            if result.error == DENIED:
+                yield Failed(DENIED)
+                return
             messages.append(Message("tool", tool_message(result), tool_call_id=call.id))
             if not result.ok:
                 failures += 1
@@ -85,6 +124,27 @@ async def tool_loop(ctx: FeatureContext) -> AsyncIterator[Event]:
             yield Failed(TOOL_FAILED)
             return
     yield Failed(STEP_LIMIT)
+
+
+async def run_call(ctx: FeatureContext, call: ToolCall) -> AsyncIterator[Event]:
+    """Make one call through the gateway; its result is added to `ctx.results`."""
+    yield ToolStarted(call)
+    try:
+        result = await ctx.gateway.execute(ctx.caller, ctx.feature, call, str(ctx.conversation_id))
+    except (InvalidToolCall, UnknownTool) as exc:
+        result = ToolResult(
+            call.id, ok=False, data={"problems": [str(exc)]}, error="invalid_arguments"
+        )
+    ctx.results.append(result)
+    yield ToolFinished(result)
+
+
+def use_tools_nudge(tools: list[ToolSpec]) -> str:
+    names = ", ".join(t.name for t in tools)
+    return (
+        f"Do not answer from memory. First call one of your tools ({names}) to look this up, "
+        "then answer only from what it returns."
+    )
 
 
 def tool_message(result: ToolResult) -> str:

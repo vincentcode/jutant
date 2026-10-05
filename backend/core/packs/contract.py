@@ -10,10 +10,16 @@
 - `default_feature` exists;
 - every prompt file exists and is not empty;
 - every `document_extraction` feature has at least one extraction schema;
+- every route pattern is a valid regular expression;
+- every prefetched call uses one of its feature's tools, with arguments the tool accepts, and
+  each `match` is a valid regular expression with at most one group;
 - every feature has at least one eval question.
 """
 
+import re
+
 from core.packs.loader import SYSTEM_PROMPT, Pack
+from core.packs.manifest import PrefetchDef
 from core.types import ToolSpec
 
 
@@ -26,6 +32,7 @@ def check(pack: Pack, tool_specs: list[ToolSpec]) -> list[str]:
     tools = {s.name for s in tool_specs if s.name.split(".", 1)[0] in servers}
     ruled = {r.tool for r in pack.rules}
     feature_ids = {f.id for f in m.features}
+    specs = {s.name: s for s in tool_specs}
 
     for f in m.features:
         for tool in f.tools:
@@ -37,6 +44,11 @@ def check(pack: Pack, tool_specs: list[ToolSpec]) -> list[str]:
             problems.append(f"feature {f.id}: prompt file {f.prompt} is missing or empty")
         if f.template == "document_extraction" and not m.extraction_schemas:
             problems.append(f"feature {f.id}: document_extraction needs an extraction schema")
+        for pattern in f.route.patterns:
+            if (error := _regex_problem(pattern)) is not None:
+                problems.append(f"feature {f.id}: route pattern {pattern!r}: {error}")
+        for p in f.prefetch:
+            problems.extend(_prefetch_problems(f.id, f.tools, p, specs))
 
     for tool in sorted(tools - ruled):
         problems.append(f"tool {tool} has no access rule")
@@ -71,6 +83,32 @@ def check(pack: Pack, tool_specs: list[ToolSpec]) -> list[str]:
     asked = {q.get("feature") for q in pack.eval_questions}
     for feature_id in sorted(feature_ids - asked):
         problems.append(f"feature {feature_id} has no eval question")
+    return problems
+
+
+def _regex_problem(pattern: str, max_groups: int | None = None) -> str | None:
+    try:
+        compiled = re.compile(pattern)
+    except re.error as exc:
+        return f"not a valid regular expression ({exc})"
+    if max_groups is not None and compiled.groups > max_groups:
+        return f"has {compiled.groups} groups; use at most {max_groups}"
+    return None
+
+
+def _prefetch_problems(
+    feature_id: str, feature_tools: list[str], p: PrefetchDef, specs: dict[str, ToolSpec]
+) -> list[str]:
+    where = f"feature {feature_id}: prefetch {p.tool}"
+    if p.tool not in feature_tools:
+        return [f"{where}: the feature's tools do not include it"]
+    problems = []
+    accepted = set(specs[p.tool].input_schema.get("properties", {})) if p.tool in specs else None
+    for name, argument in p.arguments.items():
+        if accepted is not None and name not in accepted:
+            problems.append(f"{where}: the tool takes no argument {name}")
+        if argument.match is not None and (error := _regex_problem(argument.match, 1)):
+            problems.append(f"{where}: argument {name}: {error}")
     return problems
 
 

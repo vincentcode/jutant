@@ -56,7 +56,8 @@ async def test_event_order_for_a_tool_turn() -> None:
 
 
 async def test_uncited_document_answer_is_replaced() -> None:
-    model = FakeModel(replies=[ModelReply("From memory: two IDs.")])
+    # Answers from memory twice: once before being told to use its tools, once after.
+    model = FakeModel(replies=[ModelReply("From memory: two IDs."), ModelReply("Still two IDs.")])
     rig = await make_rig(model)
 
     events = await collect_events(rig.orchestrator.ask(teller(), uuid4(), "kyc?", "policy_qa"))
@@ -64,6 +65,33 @@ async def test_uncited_document_answer_is_replaced() -> None:
     texts = [e.text for e in events if isinstance(e, TextDelta)]
     assert texts == [NO_SOURCE_MESSAGE]  # the uncited text never reaches the client
     assert events[-1].answer.text == NO_SOURCE_MESSAGE
+
+
+async def test_a_first_reply_without_a_tool_call_is_nudged_to_use_tools() -> None:
+    model = FakeModel(
+        replies=[
+            ModelReply("E51 means a bad account number (Manual 4.2.1)."),  # invented
+            search("E51"),
+            ModelReply("E51: beneficiary account closed."),
+        ]
+    )
+    rig = await make_rig(model, results={"documents.search": doc_result("Error codes", "E51")})
+
+    answer = await final_answer(rig.orchestrator.ask(teller(), uuid4(), "E51?", "policy_qa"))
+
+    assert answer.text == "E51: beneficiary account closed."
+    assert answer.citations == (Citation("document", "Error codes", "E51"),)
+    nudged = model.calls[1].messages
+    assert nudged[-1].role == "user"
+    assert nudged[-1].content.startswith("E51?") and "documents.search" in nudged[-1].content
+    assert not any("Manual 4.2.1" in m.content for m in nudged)  # the invented answer is dropped
+
+
+async def test_the_nudge_is_given_only_once() -> None:
+    model = FakeModel(replies=[ModelReply(""), ModelReply("")])
+    rig = await make_rig(model)
+    await collect_events(rig.orchestrator.ask(teller(), uuid4(), "E51?", "policy_qa"))
+    assert len(model.calls) == 2
 
 
 async def test_invalid_arguments_are_returned_to_the_model_once() -> None:

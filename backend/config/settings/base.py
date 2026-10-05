@@ -32,6 +32,7 @@ INSTALLED_APPS = [
     "apps.knowledge",
     "apps.playbooks",
     "apps.audit",
+    "apps.evals",
     "ingestion",
 ]
 
@@ -65,7 +66,7 @@ TEMPLATES = [
 
 DATABASES = {
     "default": dj_database_url.parse(
-        env("DATABASE_URL", "postgres://jutant:jutant@localhost:5432/jutant")
+        env("DATABASE_URL", "postgres://jutant:jutant@127.0.0.1:5432/jutant")
     ),
 }
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
@@ -79,7 +80,7 @@ TIME_ZONE = "UTC"
 USE_I18N = True
 USE_TZ = True
 
-STATIC_URL = "admin-static/"
+STATIC_URL = "/admin/static/"  # served by the API, under the admin mount (config/asgi.py)
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # --- Jutant ------------------------------------------------------------------
@@ -88,6 +89,23 @@ JUTANT_PACK_PATH = BASE_DIR / env("JUTANT_PACK_PATH", "packs/banking")
 JUTANT_CALLER_SECRET = env("JUTANT_CALLER_SECRET", "change-me")
 JUTANT_SESSION_SECRET = env("JUTANT_SESSION_SECRET", "change-me-too")
 JUTANT_SESSION_TTL_MIN = int(env("JUTANT_SESSION_TTL_MIN", "480"))
+
+# Sign-in limits against password guessing: a username is locked after this many failures in
+# the window, and an address after this many across all usernames.
+JUTANT_LOGIN_MAX_FAILURES = int(env("JUTANT_LOGIN_MAX_FAILURES", "5"))
+JUTANT_LOGIN_MAX_FAILURES_PER_IP = int(env("JUTANT_LOGIN_MAX_FAILURES_PER_IP", "20"))
+JUTANT_LOGIN_WINDOW_MIN = int(env("JUTANT_LOGIN_WINDOW_MIN", "15"))
+
+# How long data kept only for a while is kept (manage.py purge_expired deletes it).
+JUTANT_UPLOAD_RETENTION_DAYS = int(env("JUTANT_UPLOAD_RETENTION_DAYS", "30"))
+JUTANT_LOGIN_ATTEMPT_RETENTION_DAYS = int(env("JUTANT_LOGIN_ATTEMPT_RETENTION_DAYS", "7"))
+# Proxies whose X-Forwarded-For is believed (comma-separated addresses or networks), such as
+# the web container's nginx. Empty: the connecting address is the client's.
+JUTANT_TRUSTED_PROXIES = [
+    p.strip() for p in env("JUTANT_TRUSTED_PROXIES", "").split(",") if p.strip()
+]
+# Secure cookies are sent over HTTPS only; the development settings turn this off for http://localhost.
+JUTANT_SESSION_COOKIE_SECURE = env("JUTANT_SESSION_COOKIE_SECURE", "true").lower() == "true"
 JUTANT_CORS_ORIGINS = [o for o in env("JUTANT_CORS_ORIGINS", "").split(",") if o]
 
 JUTANT_LLM_PROVIDER = env("JUTANT_LLM_PROVIDER", "ollama")
@@ -98,6 +116,16 @@ JUTANT_LLM_TEMPERATURE = float(env("JUTANT_LLM_TEMPERATURE", "0.1"))
 JUTANT_LLM_TIMEOUT_S = int(env("JUTANT_LLM_TIMEOUT_S", "300"))
 JUTANT_EMBED_MODEL = env("JUTANT_EMBED_MODEL", "nomic-embed-text")
 JUTANT_EMBED_DIM = int(env("JUTANT_EMBED_DIM", "768"))
+# Task prefixes the embedding model was trained with (these are nomic-embed-text's); empty for
+# models that use none. Changing them, or the model, needs `manage.py reindex`.
+JUTANT_EMBED_QUERY_PREFIX = env("JUTANT_EMBED_QUERY_PREFIX", "search_query: ")
+JUTANT_EMBED_DOCUMENT_PREFIX = env("JUTANT_EMBED_DOCUMENT_PREFIX", "search_document: ")
+JUTANT_EMBED_ROUTE_PREFIX = env("JUTANT_EMBED_ROUTE_PREFIX", "classification: ")
+
+# Routing by meaning decides only when the question is this similar to a feature's examples,
+# and this far ahead of the next feature; otherwise the model chooses. Measured on the evals.
+JUTANT_ROUTE_MIN_SIMILARITY = float(env("JUTANT_ROUTE_MIN_SIMILARITY", "0.80"))
+JUTANT_ROUTE_MIN_MARGIN = float(env("JUTANT_ROUTE_MIN_MARGIN", "0.05"))
 
 JUTANT_MAX_STEPS = int(env("JUTANT_MAX_STEPS", "4"))
 JUTANT_HISTORY_LIMIT = int(env("JUTANT_HISTORY_LIMIT", "6"))

@@ -46,7 +46,7 @@ def parse_choice(reply: str | None, ids: Sequence[str]) -> str | None:
     """The id the model replied with, or None if the reply is not exactly one of `ids`."""
     if not reply:
         return None
-    cleaned = reply.strip().strip("`'\"").strip().rstrip(".").strip().lower()
+    cleaned = reply.strip().strip("`'\".:; ").lower()  # quotes and punctuation, in any order
     for option_id in ids:
         if cleaned == option_id.lower():
             return option_id
@@ -72,6 +72,14 @@ async def choose(
         return None
     if len(options) == 1:
         return options[0].id
+    chosen = await ask_model(model, instruction, text, options)
+    return chosen or best_keyword_match(text, options)
+
+
+async def ask_model(
+    model: ModelProvider, instruction: str, text: str, options: Sequence[Option]
+) -> str | None:
+    """The option the model picks, or None if it is unavailable or its reply is not an id."""
     listing = "\n".join(f"{o.id}: {o.description}" for o in options)
     messages = [
         Message("system", f"{instruction}\n\n{listing}\n\nReply with the id only."),
@@ -80,6 +88,5 @@ async def choose(
     try:
         reply = await model.chat(messages, [])
     except ModelUnavailable:
-        reply = None
-    chosen = parse_choice(reply.text if reply else None, [o.id for o in options])
-    return chosen or best_keyword_match(text, options)
+        return None
+    return parse_choice(reply.text, [o.id for o in options])

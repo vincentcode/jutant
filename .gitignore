@@ -12,3 +12,5 @@ node_modules/
 web/dist/
 web/.env
 web/tsconfig.tsbuildinfo
+web/openapi.json
+backend/evals-*.json

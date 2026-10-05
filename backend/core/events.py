@@ -22,7 +22,12 @@ class ToolFinished:
 
 @dataclass(frozen=True)
 class TextDelta:
+    """Answer text. From a template, `continues` marks a piece of a streamed answer; without it
+    the text is a new paragraph. The orchestrator's output already carries the paragraph
+    breaks, so whoever reads it only appends."""
+
     text: str
+    continues: bool = False
 
 
 @dataclass(frozen=True)

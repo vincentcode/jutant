@@ -1,11 +1,29 @@
+from dataclasses import replace
+from typing import Any
 from uuid import uuid4
 
 from core.documents.chunking import split
+from core.documents.summarise import split_into_parts, summarise
 from core.events import PlaybookStepShown, TextDelta
 from core.extraction.extractor import extract, parse_json_object
-from core.types import ModelReply, Playbook, PlaybookStep, ToolCall, ToolResult
+from core.types import (
+    Citation,
+    ModelReply,
+    Playbook,
+    PlaybookStep,
+    ToolCall,
+    ToolResult,
+    ToolSpec,
+)
 from providers.llm.fake import FakeModel
-from tests.builders import BLOCKED_CARD, collect_events, final_answer, make_rig, teller
+from tests.builders import (
+    BLOCKED_CARD,
+    FEATURES,
+    collect_events,
+    final_answer,
+    make_rig,
+    teller,
+)
 
 SCHEMAS = {
     "id_card": ["full_name", "id_number", "expiry_date"],
@@ -91,6 +109,92 @@ async def test_extraction_without_upload_uses_the_tool_loop() -> None:
 
     assert answer.text == "Summary."
     assert rig.tools.calls[0].call.name == "documents.get"
+
+
+SUMMARY = replace(FEATURES[4], id="summary", tools=("documents.search", "documents.get"))
+DOC_ID = "6f1c2c1e-0000-0000-0000-000000000001"
+
+
+OPEN_SPECS = [ToolSpec(n, n, {"type": "object"}) for n in ("documents.search", "documents.get")]
+
+
+def documents(parts: list[str], hits: bool = True) -> dict[str, Any]:
+    """Fake documents tools: a search that finds one document, and `get` serving its parts."""
+    found = [{"document_id": DOC_ID, "title": "Circular 14", "section": "Purpose", "text": "x"}]
+    search = ToolResult(
+        "",
+        ok=True,
+        data=found if hits else [],
+        citations=(Citation("document", "Circular 14", "Purpose"),),
+    )
+
+    def get(arguments: dict[str, Any]) -> ToolResult:
+        n = arguments["part"]
+        return ToolResult(
+            "",
+            ok=True,
+            data={
+                "document_id": DOC_ID,
+                "title": "Circular 14",
+                "text": parts[n - 1],
+                "part": n,
+                "parts": len(parts),
+            },
+            citations=(Citation("document", "Circular 14", "whole document"),),
+        )
+
+    return {"documents.search": search, "documents.get": get}
+
+
+async def test_an_indexed_document_is_found_and_read_whole_in_code() -> None:
+    model = FakeModel(replies=[ModelReply("- Tellers may reactivate.\n- From 1 November.")])
+    rig = await make_rig(
+        model, results=documents(["Part one. ", "Part two."]), features=(SUMMARY,), specs=OPEN_SPECS
+    )
+
+    answer = await final_answer(
+        rig.orchestrator.ask(teller(), uuid4(), "Summarise circular 14", "summary")
+    )
+
+    calls = [(c.call.name, c.call.arguments) for c in rig.tools.calls]
+    assert calls == [
+        ("documents.search", {"query": "Summarise circular 14"}),
+        ("documents.get", {"document_id": DOC_ID, "part": 1}),
+        ("documents.get", {"document_id": DOC_ID, "part": 2}),
+    ]
+    assert len(model.calls) == 1  # a short document is summarised in one call
+    assert "Part one. Part two." in model.calls[0].messages[1].content
+    assert answer.text == "Summary of Circular 14:\n\n- Tellers may reactivate.\n- From 1 November."
+    assert Citation("document", "Circular 14", "whole document") in answer.citations
+
+
+async def test_no_matching_document_is_said_plainly_without_the_model() -> None:
+    model = FakeModel()
+    rig = await make_rig(
+        model, results=documents([], hits=False), features=(SUMMARY,), specs=OPEN_SPECS
+    )
+    answer = await final_answer(rig.orchestrator.ask(teller(), uuid4(), "Summarise X", "summary"))
+    assert answer.text.startswith("I could not find a document") and model.calls == []
+
+
+async def test_a_very_long_document_is_read_up_to_a_limit_and_says_so() -> None:
+    parts = [f"Part {n}. " for n in range(1, 11)]
+    model = FakeModel(replies=[ModelReply("Summary.")])
+    rig = await make_rig(model, results=documents(parts), features=(SUMMARY,), specs=OPEN_SPECS)
+    answer = await final_answer(rig.orchestrator.ask(teller(), uuid4(), "Summarise it", "summary"))
+    assert len(rig.tools.calls) == 1 + 8
+    assert answer.text.endswith(
+        "This covers the first 8 of 10 parts of the document; open it for the rest."
+    )
+
+
+async def test_a_long_text_is_summarised_in_parts_then_combined() -> None:
+    section = " ".join(["word"] * 1500)
+    text = f"# One\n\n{section}\n\n# Two\n\n{section}"
+    assert len(split_into_parts(text)) == 2
+    model = FakeModel(replies=[ModelReply("First."), ModelReply("Second."), ModelReply("Whole.")])
+    assert await summarise(model, text) == "Whole."
+    assert model.calls[2].messages[1].content == "First.\n\nSecond."
 
 
 async def test_extractor_never_guesses_on_an_unparseable_reply() -> None:
