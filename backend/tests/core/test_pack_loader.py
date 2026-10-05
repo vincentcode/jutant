@@ -234,3 +234,39 @@ def test_a_prefetch_argument_has_exactly_one_source(pack_root: Path) -> None:
     prefetch = {"tool": "documents.search", "arguments": {"query": {"question": True, "value": 1}}}
     with pytest.raises(ValueError, match="exactly one"):
         load_pack(write_pack(pack_root, manifest=with_feature(prefetch=[prefetch])))
+
+
+def test_a_branch_must_not_run_on_into_another_branch(pack_root: Path) -> None:
+    # The failed-transfer procedure as first written: "failed" went to step 2, which had no
+    # next_on, so it carried on into step 3, the advice for pending transfers.
+    playbook = {
+        **PLAYBOOK,
+        "steps": [
+            {
+                "order": 1,
+                "title": "Status",
+                "instruction": "Which status?",
+                "audience": ["staff"],
+                "expects": "choice",
+                "choices": ["failed", "pending"],
+                "next_on": {"failed": 2, "pending": 3},
+            },
+            {
+                "order": 2,
+                "title": "Explain",
+                "instruction": "Explain the failure.",
+                "audience": ["staff"],
+            },
+            {
+                "order": 3,
+                "title": "Timing",
+                "instruction": "Pending transfers settle soon.",
+                "audience": ["staff"],
+            },
+        ],
+    }
+    found = violations(pack_root, playbook=playbook)
+    assert (
+        "playbook reset step 2: the 'failed' branch of step 1 runs on into step 3, "
+        "the 'pending' branch; end it with next_on"
+    ) in found

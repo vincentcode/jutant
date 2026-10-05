@@ -20,13 +20,21 @@ steps:
     instruction: Explain the failure reason and confirm the funds were returned.
     audience: [staff, customer]
     expects: confirm
+    next_on: {confirm: 6}  # each branch ends at the close, not in the next branch
   - order: 4
     title: Advise on timing
     instruction: Tell the customer when pending transfers normally settle.
     audience: [staff, customer]
     expects: confirm
+    next_on: {confirm: 6}
   - order: 5
     title: Ask the beneficiary bank
     instruction: Raise a trace with the beneficiary bank.
     audience: [staff]
     expects: confirm
+    next_on: {confirm: 6}
+  - order: 6
+    title: Close
+    instruction: Confirm the outcome with the customer.
+    audience: [staff, customer]
+    expects: none

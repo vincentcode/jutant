@@ -7,6 +7,7 @@
 - every role named by a feature, classification or field rule is one of the pack's roles;
 - every playbook step has at least one audience, and each is one of the pack's audiences;
 - every `next_on` target is an existing step, and every choice step lists its choices;
+- no branch of a choice runs on, in step order, into another branch of the same choice;
 - `default_feature` exists;
 - every prompt file exists and is not empty;
 - every `document_extraction` feature has at least one extraction schema;
@@ -20,7 +21,7 @@ import re
 
 from core.packs.loader import SYSTEM_PROMPT, Pack
 from core.packs.manifest import PrefetchDef
-from core.types import ToolSpec
+from core.types import Playbook, ToolSpec
 
 
 def check(pack: Pack, tool_specs: list[ToolSpec]) -> list[str]:
@@ -74,6 +75,7 @@ def check(pack: Pack, tool_specs: list[ToolSpec]) -> list[str]:
                     problems.append(f"{where}: next_on {answer} points to missing step {target}")
             if step.expects == "choice" and not step.choices:
                 problems.append(f"{where}: a choice step needs choices")
+        problems.extend(_branches_running_into_each_other(playbook))
 
     if m.default_feature not in feature_ids:
         problems.append(f"default_feature {m.default_feature} is not a feature")
@@ -83,6 +85,35 @@ def check(pack: Pack, tool_specs: list[ToolSpec]) -> list[str]:
     asked = {q.get("feature") for q in pack.eval_questions}
     for feature_id in sorted(feature_ids - asked):
         problems.append(f"feature {feature_id} has no eval question")
+    return problems
+
+
+def _branches_running_into_each_other(playbook: Playbook) -> list[str]:
+    """A branch of a choice that, with no `next_on` of its own, carries on in step order into
+    another branch of the same choice: the failed-transfer branch running on into the advice
+    for pending transfers."""
+    steps = sorted(playbook.steps, key=lambda s: s.order)
+    problems = []
+    for choice in steps:
+        if choice.expects != "choice":
+            continue
+        branches = {target: answer for answer, target in choice.next_on.items()}
+        for target, answer in branches.items():
+            current = next((s for s in steps if s.order == target), None)
+            while current is not None and not current.next_on:
+                following = next((s for s in steps if s.order > current.order), None)
+                if (
+                    following is not None
+                    and following.order in branches
+                    and following.order != target
+                ):
+                    problems.append(
+                        f"playbook {playbook.id} step {current.order}: the {answer!r} branch of "
+                        f"step {choice.order} runs on into step {following.order}, the "
+                        f"{branches[following.order]!r} branch; end it with next_on"
+                    )
+                    break
+                current = following
     return problems
 
 
