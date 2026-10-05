@@ -54,4 +54,5 @@ class PlaybookRun(models.Model):
     current_order = models.PositiveIntegerField()
     answers = models.JSONField(default=dict, blank=True)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.ACTIVE)
+    feature_id = models.CharField(max_length=64, blank=True)  # the feature that started the run
     created_at = models.DateTimeField(auto_now_add=True)

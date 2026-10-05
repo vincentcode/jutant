@@ -1,18 +1,18 @@
 """`checklist` template.
 
-Tool loop over documents and pack requirement tools; returns a list.
+What a request needs: forms, signatures, approvals. The model calls the pack's requirement
+tools and document search, and answers as a list.
 """
 
 from collections.abc import AsyncIterator
 
 from core.events import Event
-from core.features.templates.base import FeatureContext
+from core.features.templates.base import FeatureContext, tool_loop
 
 
 class ChecklistTemplate:
     id = "checklist"
     requires_citation = True
 
-    async def run(self, ctx: FeatureContext) -> AsyncIterator[Event]:
-        raise NotImplementedError
-        yield  # pragma: no cover
+    def run(self, ctx: FeatureContext) -> AsyncIterator[Event]:
+        return tool_loop(ctx)

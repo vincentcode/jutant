@@ -10,7 +10,11 @@ class FeatureRegistry:
         self._features = {f.id: f for f in features}
 
     def get(self, feature_id: str) -> Feature:
-        raise NotImplementedError
+        """Raises KeyError for an id the pack does not define."""
+        return self._features[feature_id]
 
     def for_role(self, role: str) -> list[Feature]:
-        raise NotImplementedError
+        return [f for f in self._features.values() if f.allows(role)]
+
+    def __iter__(self):
+        return iter(self._features.values())

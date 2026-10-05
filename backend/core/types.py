@@ -106,6 +106,7 @@ class PlaybookRunState:
     current_order: int
     answers: dict[int, str] = field(default_factory=dict)
     status: PlaybookRunStatus = "active"
+    feature_id: str = ""  # the feature that started the run, for history and audit
 
 
 @dataclass(frozen=True)

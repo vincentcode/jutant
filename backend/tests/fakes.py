@@ -1,16 +1,24 @@
 """In-memory implementations of the core ports, for core tests without Django."""
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from core.types import Caller, Message, Playbook, PlaybookRunState
+from core.types import Caller, Citation, Message, Playbook, PlaybookRunState
+
+
+@dataclass(frozen=True)
+class StoredMessage:
+    message: Message
+    feature_id: str | None
+    citations: tuple[Citation, ...]
 
 
 class InMemoryConversationStore:
     def __init__(self) -> None:
         self.owners: dict[UUID, str] = {}
-        self.messages: dict[UUID, list[tuple[Message, str | None]]] = {}
+        self.messages: dict[UUID, list[StoredMessage]] = {}
 
     async def create(self, caller: Caller) -> UUID:
         conversation_id = uuid4()
@@ -19,13 +27,18 @@ class InMemoryConversationStore:
         return conversation_id
 
     async def recent_messages(self, conversation_id: UUID, limit: int) -> list[Message]:
-        history = [m for m, _ in self.messages.get(conversation_id, [])]
+        history = [stored.message for stored in self.messages.get(conversation_id, [])]
         return history[-limit:] if limit else []
 
     async def append(
-        self, conversation_id: UUID, message: Message, feature_id: str | None = None
+        self,
+        conversation_id: UUID,
+        message: Message,
+        feature_id: str | None = None,
+        citations: tuple[Citation, ...] = (),
     ) -> None:
-        self.messages.setdefault(conversation_id, []).append((message, feature_id))
+        stored = StoredMessage(message, feature_id, citations)
+        self.messages.setdefault(conversation_id, []).append(stored)
 
 
 class InMemoryPlaybookStore:

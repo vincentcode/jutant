@@ -20,10 +20,16 @@ from config.asgi import application as django_app
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Build the orchestrator once, open MCP sessions, check the pack contract; close on exit."""
-    from config.container import build_orchestrator
+    from config.container import build_runtime
 
-    app.state.orchestrator = build_orchestrator()
-    yield
+    runtime = build_runtime()
+    await runtime.start()
+    app.state.pack = runtime.pack
+    app.state.orchestrator = runtime.orchestrator
+    try:
+        yield
+    finally:
+        await runtime.stop()
 
 
 def create_app() -> FastAPI:

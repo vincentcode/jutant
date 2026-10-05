@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from core.types import Caller, Message
+from core.types import Caller, Citation, Message
 
 
 class DjangoConversationStore:
@@ -13,6 +13,10 @@ class DjangoConversationStore:
         raise NotImplementedError
 
     async def append(
-        self, conversation_id: UUID, message: Message, feature_id: str | None = None
+        self,
+        conversation_id: UUID,
+        message: Message,
+        feature_id: str | None = None,
+        citations: tuple[Citation, ...] = (),
     ) -> None:
         raise NotImplementedError

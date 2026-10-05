@@ -8,4 +8,9 @@ from core.types import Citation, ToolResult
 
 def collect(results: Iterable[ToolResult]) -> tuple[Citation, ...]:
     """Every citation from successful results, de-duplicated, in first-seen order."""
-    raise NotImplementedError
+    seen: dict[Citation, None] = {}
+    for result in results:
+        if result.ok:
+            for citation in result.citations:
+                seen.setdefault(citation, None)
+    return tuple(seen)

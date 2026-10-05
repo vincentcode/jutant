@@ -7,6 +7,7 @@ from uuid import UUID
 
 from core.types import (
     Caller,
+    Citation,
     DocumentHit,
     Message,
     ModelReply,
@@ -45,7 +46,11 @@ class ConversationStore(Protocol):
     async def create(self, caller: Caller) -> UUID: ...
     async def recent_messages(self, conversation_id: UUID, limit: int) -> list[Message]: ...
     async def append(
-        self, conversation_id: UUID, message: Message, feature_id: str | None = None
+        self,
+        conversation_id: UUID,
+        message: Message,
+        feature_id: str | None = None,
+        citations: tuple[Citation, ...] = (),
     ) -> None: ...
 
 
