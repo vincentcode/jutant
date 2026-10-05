@@ -5,11 +5,14 @@ stands behind each interface the core depends on. Tests build the orchestrator w
 """
 
 from dataclasses import dataclass
+from datetime import timedelta
+from typing import Any
 
 from django.conf import settings
 
 from apps.audit.adapters import DjangoAuditSink
 from apps.conversation.adapters import DjangoConversationStore
+from apps.identity.adapters import DjangoIdentityProvider, LoginLimits
 from apps.playbooks.adapters import DjangoPlaybookStore
 from core.errors import PackContractError
 from core.features.registry import FeatureRegistry
@@ -17,10 +20,13 @@ from core.features.router import FeatureRouter
 from core.orchestrator.orchestrator import Orchestrator
 from core.packs.contract import check
 from core.packs.loader import Pack, load_pack
+from core.ports import ModelProvider
 from core.tools.catalog import ToolCatalog
 from core.tools.gateway import ToolGateway
 from providers.llm import factory as llm_factory
 from providers.mcp.client import McpToolClient
+from providers.ocr.base import OcrEngine
+from providers.ocr.tesseract import TesseractOcr
 
 
 def resolve_servers(pack: Pack) -> dict[str, str]:
@@ -36,11 +42,15 @@ def resolve_servers(pack: Pack) -> dict[str, str]:
 
 @dataclass
 class Runtime:
-    """The loaded pack, the orchestrator and the MCP connections behind it."""
+    """Everything the API serves with: the loaded pack, the orchestrator and the MCP
+    connections behind it, and the stores the API reads directly."""
 
     pack: Pack
     orchestrator: Orchestrator
     tool_client: McpToolClient
+    identity: DjangoIdentityProvider
+    conversations: DjangoConversationStore
+    ocr: OcrEngine | None
 
     async def start(self) -> None:
         """Connect to the MCP servers, read their tools and check the pack contract.
@@ -56,27 +66,60 @@ class Runtime:
 
     async def stop(self) -> None:
         await self.tool_client.close()
+        close_model = getattr(self.orchestrator.model, "close", None)
+        if close_model is not None:
+            await close_model()
 
 
-def build_runtime() -> Runtime:
+def build_runtime(
+    model: ModelProvider | None = None,
+    servers: dict[str, Any] | None = None,
+    ocr: OcrEngine | None = None,
+) -> Runtime:
+    """The deployment's runtime. Tests pass a fake model and in-process MCP servers instead of
+    the configured ones; everything else is wired exactly as deployed."""
     pack = load_pack(settings.JUTANT_PACK_PATH)
-    model = llm_factory.build(settings)
-    tool_client = McpToolClient(servers=resolve_servers(pack), secret=settings.JUTANT_CALLER_SECRET)
+    model = model or llm_factory.build(settings)
+    tool_client = McpToolClient(
+        servers=servers or resolve_servers(pack), secret=settings.JUTANT_CALLER_SECRET
+    )
+    conversations = DjangoConversationStore()
     registry = FeatureRegistry(pack.features)
     audit = DjangoAuditSink()
     gateway = ToolGateway(tool_client, ToolCatalog(tool_client), audit)
     orchestrator = Orchestrator(
         model=model,
         tools=tool_client,
-        conversations=DjangoConversationStore(),
+        conversations=conversations,
         playbooks=DjangoPlaybookStore(),
         audit=audit,
         registry=registry,
-        router=FeatureRouter(model, registry, default=pack.manifest.default_feature),
+        router=FeatureRouter(
+            model,
+            registry,
+            default=pack.manifest.default_feature,
+            embed_prefix=settings.JUTANT_EMBED_ROUTE_PREFIX,
+            min_similarity=settings.JUTANT_ROUTE_MIN_SIMILARITY,
+            min_margin=settings.JUTANT_ROUTE_MIN_MARGIN,
+        ),
         gateway=gateway,
         max_steps=settings.JUTANT_MAX_STEPS,
         history_limit=settings.JUTANT_HISTORY_LIMIT,
         system_prompt=pack.system_prompt,
         extraction_schemas=pack.extraction_schemas,
     )
-    return Runtime(pack, orchestrator, tool_client)
+    return Runtime(
+        pack=pack,
+        orchestrator=orchestrator,
+        tool_client=tool_client,
+        identity=DjangoIdentityProvider(
+            pack.manifest.roles,
+            LoginLimits(
+                per_user=settings.JUTANT_LOGIN_MAX_FAILURES,
+                per_ip=settings.JUTANT_LOGIN_MAX_FAILURES_PER_IP,
+                window=timedelta(minutes=settings.JUTANT_LOGIN_WINDOW_MIN),
+            ),
+        ),
+        conversations=conversations,
+        ocr=ocr or TesseractOcr(),
+    )
