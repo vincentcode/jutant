@@ -41,8 +41,11 @@ export async function* ask(
     body: JSON.stringify(body),
     signal,
   })
+  if (response.status === 401) window.location.assign('/login')
   if (!response.ok || !response.body) {
-    throw new ApiError(response.status, await response.text().catch(() => null))
+    const body: unknown = await response.json().catch(() => null)
+    const detail = body && typeof body === 'object' && 'detail' in body ? body.detail : body
+    throw new ApiError(response.status, detail)
   }
   const reader = response.body.pipeThrough(new TextDecoderStream()).getReader()
   let buffer = ''

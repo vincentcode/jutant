@@ -95,6 +95,31 @@ async def test_cancel_abandons_the_run_and_frees_the_conversation() -> None:
     assert await rig.playbooks.get_run(conversation_id) is None
 
 
+async def test_choosing_another_feature_leaves_the_playbook() -> None:
+    model = FakeModel(replies=[ModelReply("From the policy."), ModelReply("unused")])
+    rig = await make_rig(model)
+    conversation_id = uuid4()
+    await start_blocked_card(rig, conversation_id)
+
+    events = await collect_events(
+        rig.orchestrator.ask(teller(), conversation_id, "KYC rule?", "policy_qa")
+    )
+
+    assert shown(events) == []  # answered by the chosen feature, not the playbook
+    assert rig.playbooks.runs[conversation_id].status == "abandoned"
+    assert "playbook_step" in rig.audit.names()
+
+
+async def test_the_same_feature_keeps_the_playbook_going() -> None:
+    rig = await make_rig(FakeModel())
+    conversation_id = uuid4()
+    await start_blocked_card(rig, conversation_id)
+    events = await collect_events(
+        rig.orchestrator.ask(teller(), conversation_id, "done", "troubleshooting")
+    )
+    assert shown(events) == [2]
+
+
 async def test_customer_audience_sees_only_customer_steps() -> None:
     rig = await make_rig(FakeModel())
     customer = Caller("C1", "teller", "customer", {})

@@ -1,0 +1,13 @@
+.sources {
+  display: grid;
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.sources ul {
+  margin: 0;
+  padding-left: 18px;
+}

@@ -7,12 +7,28 @@
 
 .form {
   display: grid;
-  gap: 12px;
+  gap: 14px;
   width: 100%;
   max-width: 360px;
+  padding: 28px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.form h1 {
+  margin: 0 0 4px;
+  font-size: 1.4rem;
 }
 
 .form label {
   display: grid;
-  gap: 4px;
+  gap: 6px;
+  font-size: 0.9rem;
+}
+
+.error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 0.9rem;
 }

@@ -1,0 +1,33 @@
+.card {
+  align-self: flex-start;
+  max-width: min(720px, 92%);
+  padding: 12px 16px;
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  background: var(--accent-soft);
+}
+
+.card h2 {
+  margin: 0 0 6px;
+  font-size: 1rem;
+}
+
+.card p {
+  margin: 0 0 10px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.actions button {
+  text-transform: capitalize;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
