@@ -9,6 +9,7 @@ from core.types import (
     Caller,
     Citation,
     DocumentHit,
+    DocumentText,
     Message,
     ModelReply,
     Playbook,
@@ -33,7 +34,14 @@ AUDIT_EVENTS = (
 
 class ModelProvider(Protocol):
     async def chat(self, messages: list[Message], tools: list[ToolSpec]) -> ModelReply: ...
-    def stream(self, messages: list[Message]) -> AsyncIterator[str]: ...
+
+    def stream_chat(
+        self, messages: list[Message], tools: list[ToolSpec]
+    ) -> AsyncIterator[str | ModelReply]:
+        """Like `chat`, but yields the reply's text in pieces as it is written, then the whole
+        ModelReply last. A reply that calls tools yields no text, only the ModelReply."""
+        ...
+
     async def embed(self, texts: list[str]) -> list[list[float]]: ...
 
 
@@ -63,9 +71,9 @@ class PlaybookStore(Protocol):
 
 class DocumentStore(Protocol):
     async def search(
-        self, query: str, classifications: list[str], limit: int
+        self, query: str, classifications: list[str], limit: int, doc_type: str | None = None
     ) -> list[DocumentHit]: ...
-    async def get_text(self, document_id: UUID, classifications: list[str]) -> str: ...
+    async def get_document(self, document_id: UUID, classifications: list[str]) -> DocumentText: ...
 
 
 class AuditSink(Protocol):

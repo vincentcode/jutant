@@ -24,6 +24,7 @@ class Document(models.Model):
     effective_date = models.DateField(null=True, blank=True)
     checksum = models.CharField(max_length=64, db_index=True)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    text = models.TextField(blank=True)  # full text, for summarising a whole document
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self) -> str:

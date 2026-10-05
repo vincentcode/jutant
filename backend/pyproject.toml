@@ -58,6 +58,7 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.File", "fastapi.Query"]
 # --- pytest -----------------------------------------------------------------
 
 [tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings.test"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests", "packs", "apps", "api"]
@@ -79,6 +80,8 @@ forbidden_modules = ["django", "fastapi", "api", "apps", "providers", "mcp_serve
 name = "Packs depend only on core"
 type = "forbidden"
 source_modules = ["packs"]
+# A pack's tests call its tools through the platform's MCP client, exactly as the platform does.
+ignore_imports = ["packs.*.tests.** -> providers.mcp.client"]
 forbidden_modules = ["api", "apps", "providers", "config", "ingestion"]
 
 [[tool.importlinter.contracts]]
@@ -91,6 +94,9 @@ forbidden_modules = ["fastapi"]
 name = "API does not touch models"
 type = "forbidden"
 source_modules = ["api"]
+# The API reaches data through the container and adapters, which do use models; only a direct
+# import from api/ is forbidden.
+allow_indirect_imports = true
 forbidden_modules = ["apps.identity.models", "apps.conversation.models", "apps.knowledge.models",
                      "apps.playbooks.models", "apps.audit.models"]
 

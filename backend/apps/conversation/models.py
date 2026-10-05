@@ -5,7 +5,7 @@ from django.db import models
 
 class Conversation(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    staff_id = models.UUIDField(db_index=True)  # cross-app reference: plain id
+    staff_id = models.CharField(max_length=64, db_index=True)  # the caller's staff number
     title = models.CharField(max_length=200, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -35,3 +35,15 @@ class Message(models.Model):
 
     class Meta:
         indexes = [models.Index(fields=["conversation", "created_at"])]
+
+
+class Upload(models.Model):
+    """A file staff uploaded into a conversation, for extraction. Its text is used in that
+    conversation only and is never added to the search index."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="uploads")
+    filename = models.CharField(max_length=255)
+    content_type = models.CharField(max_length=100, blank=True)
+    text = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
