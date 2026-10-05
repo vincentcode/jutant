@@ -65,6 +65,24 @@ class ModelReply:
 
 
 @dataclass(frozen=True)
+class ArgumentSource:
+    """Where a prefetched tool call takes one argument from. Exactly one is set."""
+
+    question: bool = False  # the whole question
+    match: str | None = None  # a regular expression: its first group (or the whole match)
+    value: Any = None  # a fixed value
+
+
+@dataclass(frozen=True)
+class Prefetch:
+    """A tool call made in code before the model is asked, when every argument can be filled
+    from the question. It saves the model a step it would take anyway."""
+
+    tool: str
+    arguments: dict[str, ArgumentSource]
+
+
+@dataclass(frozen=True)
 class Feature:
     id: str
     template: str  # one of the six template ids
@@ -73,6 +91,9 @@ class Feature:
     prompt: str  # resolved prompt text
     tools: tuple[str, ...]  # tool names this feature may use
     roles: tuple[str, ...]  # roles allowed to use the feature; empty = all
+    route_patterns: tuple[str, ...] = ()  # a match routes here without asking the model
+    route_examples: tuple[str, ...] = ()  # questions this feature answers, matched by meaning
+    prefetch: tuple[Prefetch, ...] = ()
 
     def allows(self, role: str) -> bool:
         return not self.roles or role in self.roles
@@ -117,6 +138,14 @@ class DocumentHit:
     text: str
     score: float
     classification: str
+
+
+@dataclass(frozen=True)
+class DocumentText:
+    document_id: UUID
+    title: str
+    classification: str
+    text: str
 
 
 @dataclass(frozen=True)

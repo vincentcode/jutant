@@ -1,11 +1,25 @@
-"""Shared server bootstrap: a FastMCP server over streamable HTTP, one process per server."""
+"""Runs a guarded MCP server over streamable HTTP, one process per server.
 
-from mcp.server.fastmcp import FastMCP
+The server is stateless: it keeps no session between requests, so if it restarts, the
+platform's next call simply works without reconnecting.
+"""
+
+import os
+from urllib.parse import urlparse
+
+from mcp_servers.common.guard import GuardedServer
+
+DEFAULT_HOST = "0.0.0.0"  # inside a container; set JUTANT_MCP_HOST=127.0.0.1 to run locally
 
 
-def build_server(name: str, port: int) -> FastMCP:
-    return FastMCP(name, host="0.0.0.0", port=port, stateless_http=True)
-
-
-def run(server: FastMCP) -> None:
-    server.run(transport="streamable-http")
+def serve(server: GuardedServer, url: str) -> None:
+    """Listen on the port and path of `url`, the address the platform is configured to call."""
+    address = urlparse(url)
+    server.mcp.run(
+        transport="streamable-http",
+        host=os.environ.get("JUTANT_MCP_HOST", DEFAULT_HOST),
+        port=address.port or 80,
+        streamable_http_path=address.path or "/mcp",
+        stateless_http=True,
+        json_response=True,
+    )
