@@ -34,11 +34,12 @@ from core.events import (
 from core.features.registry import FeatureRegistry
 from core.features.router import FeatureRouter
 from core.features.templates import TEMPLATES, FeatureContext, FeatureTemplate
+from core.features.templates.base import call_tool
 from core.observability import NOOP, Trace, TraceContent, TracedModel, Tracer
 from core.orchestrator.citations import collect
 from core.orchestrator.context import build_messages
 from core.orchestrator.timing import TimedModel, TurnTimer
-from core.playbooks.runner import PlaybookRunner
+from core.playbooks.runner import Lookup, PlaybookRunner
 from core.ports import AuditSink, ConversationStore, ModelProvider, PlaybookStore, ToolClient
 from core.tools.gateway import ToolGateway
 from core.types import Answer, Caller, Feature, Message, ToolCall, ToolResult
@@ -139,10 +140,18 @@ class Orchestrator:
             run = None
         if run is not None:
             await self.conversations.append(conversation_id, Message("user", text))
-            events = self.runner.advance(caller, conversation_id, text)
+            results: list[ToolResult] = []
+            lookup = self._lookup(caller, conversation_id, run.feature_id, turn, results)
+            events = self.runner.advance(caller, conversation_id, text, lookup)
             turn.set(feature=run.feature_id, playbook=run.playbook_id)
             async for event in self._finish(
-                caller, conversation_id, run.feature_id, events, timer=timer, trace=turn
+                caller,
+                conversation_id,
+                run.feature_id,
+                events,
+                results=results,
+                timer=timer,
+                trace=turn,
             ):
                 yield event
             return
@@ -182,6 +191,30 @@ class Orchestrator:
             turn,
         ):
             yield event
+
+    def _lookup(
+        self,
+        caller: Caller,
+        conversation_id: UUID,
+        feature_id: str,
+        trace: Trace,
+        results: list[ToolResult],
+    ) -> Lookup | None:
+        """How a playbook step looks a record up: a tool call of the feature running the
+        playbook, made as any other (feature check, policy, audit, trace)."""
+        try:
+            feature = self.registry.get(feature_id)
+        except KeyError:
+            return None
+
+        async def lookup(call: ToolCall) -> ToolResult:
+            result = await call_tool(
+                self.gateway, trace, caller, feature, str(conversation_id), call
+            )
+            results.append(result)
+            return result
+
+        return lookup
 
     async def _resolve(
         self,

@@ -3,25 +3,40 @@
 The playbook decides the next step (from `next_on` or the step order); the model never does.
 The model is used only to map a free-text reply onto one of a step's listed choices.
 "cancel" or "stop" abandons the run.
+
+A step can look a record up with the reply (`lookup`): "TX-0002" fetches that transfer through
+the given `lookup` function, which makes the call as any tool call is made (feature check,
+policy, audit, trace). The record is kept with the run, and later steps use it:
+
+- a choice step with `answer_from: 1.status` is answered by the record, when its value is one
+  of the step's choices, so the procedure takes the right branch without asking;
+- an instruction can quote the record: "Failed: {1.failure_reason}".
+
+A reference that is not found, or a record the caller may not see, keeps the run on the step.
 """
 
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import replace
-from uuid import UUID
+from typing import Any
+from uuid import UUID, uuid4
 
-from core.events import Event, PlaybookStepShown, TextDelta
+from core.events import Event, PlaybookStepShown, TextDelta, ToolFinished, ToolStarted
 from core.features.matching import Option, choose, parse_choice
 from core.playbooks.filtering import next_step, steps_for
 from core.ports import AuditSink, ModelProvider, PlaybookStore
-from core.types import Caller, PlaybookRunState, PlaybookStep
+from core.types import Caller, PlaybookRunState, PlaybookStep, ToolCall, ToolResult
 
 CANCEL_WORDS = frozenset({"cancel", "stop"})
 CONFIRM_WORDS = frozenset({"confirm", "done", "yes", "y", "ok", "okay", "next", "completed"})
+PLACEHOLDER = re.compile(r"\{(\d+)\.(\w+)\}")
 
 FINISHED = "Procedure complete."
 STOPPED = "Stopped the procedure."
 NO_STEPS = "This procedure has no steps for you."
+UNKNOWN = "unknown"
+
+Lookup = Callable[[ToolCall], Awaitable[ToolResult]]
 
 
 class PlaybookRunner:
@@ -44,7 +59,7 @@ class PlaybookRunner:
             yield TextDelta(NO_STEPS)
             return
         state = PlaybookRunState(playbook_id, steps[0].order, {}, "active", feature_id)
-        async for event in self._show(conversation_id, state, steps, steps[0]):
+        async for event in self._show(caller, conversation_id, state, steps, steps[0]):
             yield event
 
     async def abandon(self, caller: Caller, conversation_id: UUID) -> None:
@@ -56,7 +71,11 @@ class PlaybookRunner:
         await self._audit_step(caller, conversation_id, state, "abandoned")
 
     async def advance(
-        self, caller: Caller, conversation_id: UUID, user_input: str
+        self,
+        caller: Caller,
+        conversation_id: UUID,
+        user_input: str,
+        lookup: Lookup | None = None,
     ) -> AsyncIterator[Event]:
         state = await self.store.get_run(conversation_id)
         if state is None:
@@ -74,36 +93,65 @@ class PlaybookRunner:
         answer = await self._interpret(current, text)
         if answer is None:
             yield TextDelta(_hint(current))
-            yield PlaybookStepShown(state.playbook_id, current)
+            yield PlaybookStepShown(state.playbook_id, _filled(current, state))
             return
+
+        if current.lookup is not None and lookup is not None:
+            value = _looked_up_value(current, text)
+            if value is None:
+                yield TextDelta(_lookup_hint(current))
+                yield PlaybookStepShown(state.playbook_id, _filled(current, state))
+                return
+            call = ToolCall(
+                f"step_{uuid4().hex[:8]}", current.lookup.tool, {current.lookup.argument: value}
+            )
+            yield ToolStarted(call)
+            result = await lookup(call)
+            yield ToolFinished(result)
+            if not result.ok or not isinstance(result.data, dict):
+                yield TextDelta(_lookup_failed(result, value))
+                yield PlaybookStepShown(state.playbook_id, _filled(current, state))
+                return
+            state = replace(state, facts={**state.facts, current.order: result.data})
+            answer = value
 
         state = replace(state, answers={**state.answers, current.order: answer})
         await self._audit_step(caller, conversation_id, state, answer)
         following = next_step(steps, current, answer)
-        if following is None:
-            await self.store.save_run(conversation_id, replace(state, status="completed"))
-            yield TextDelta(FINISHED)
-            return
-        async for event in self._show(conversation_id, state, steps, following):
+        async for event in self._show(caller, conversation_id, state, steps, following):
             yield event
 
     async def _show(
         self,
+        caller: Caller,
         conversation_id: UUID,
         state: PlaybookRunState,
         steps: tuple[PlaybookStep, ...],
         step: PlaybookStep | None,
     ) -> AsyncIterator[Event]:
-        """Show `step`, then any `none` steps after it, which need no reply."""
-        while step is not None and step.expects == "none":
-            yield PlaybookStepShown(state.playbook_id, step)
-            step = next_step(steps, step, "")
+        """Show `step`. Steps that need no reply (`none`), and choices a looked-up record
+        answers, are shown or answered in turn, until one needs the staff member."""
+        while step is not None:
+            if step.expects == "none":
+                yield PlaybookStepShown(state.playbook_id, _filled(step, state))
+                step = next_step(steps, step, "")
+                continue
+            answer = _answer_from_record(step, state)
+            if answer is None:
+                break
+            yield TextDelta(f"{step.title}: {answer.replace('_', ' ')} (from the record).")
+            state = replace(
+                state, current_order=step.order, answers={**state.answers, step.order: answer}
+            )
+            await self._audit_step(caller, conversation_id, state, answer)
+            step = next_step(steps, step, answer)
         if step is None:
             await self.store.save_run(conversation_id, replace(state, status="completed"))
             yield TextDelta(FINISHED)
             return
-        await self.store.save_run(conversation_id, replace(state, current_order=step.order))
-        yield PlaybookStepShown(state.playbook_id, step)
+        state = replace(state, current_order=step.order)
+        await self.store.save_run(conversation_id, state)
+        yield PlaybookStepShown(state.playbook_id, _filled(step, state))
 
     async def _interpret(self, step: PlaybookStep, text: str) -> str | None:
         """The answer `text` gives to `step`, or None if it does not answer it."""
@@ -135,6 +183,58 @@ class PlaybookRunner:
                 "answer": answer,
             },
         )
+
+
+def _looked_up_value(step: PlaybookStep, text: str) -> str | None:
+    """What the reply gives the lookup: the pattern's first group (or match), or the reply."""
+    assert step.lookup is not None
+    if step.lookup.pattern is None:
+        return text
+    found = re.search(step.lookup.pattern, text)
+    if found is None:
+        return None
+    return found.group(1) if found.re.groups else found.group(0)
+
+
+def _answer_from_record(step: PlaybookStep, state: PlaybookRunState) -> str | None:
+    """The choice a looked-up record makes for `step`, if it names one of the choices."""
+    if step.expects != "choice" or not step.answer_from:
+        return None
+    order, _, name = step.answer_from.partition(".")
+    value = state.facts.get(int(order), {}).get(name)
+    if value is None:
+        return None
+    return parse_choice(re.sub(r"[\s-]+", "_", str(value).lower()), step.choices)
+
+
+def _filled(step: PlaybookStep, state: PlaybookRunState) -> PlaybookStep:
+    """The step with any {1.field} in its title and instruction replaced from the records."""
+    if not state.facts or "{" not in step.instruction + step.title:
+        return step
+
+    def value(match: re.Match[str]) -> str:
+        found: Any = state.facts.get(int(match.group(1)), {}).get(match.group(2))
+        return UNKNOWN if found in (None, "") else str(found)
+
+    return replace(
+        step,
+        title=PLACEHOLDER.sub(value, step.title),
+        instruction=PLACEHOLDER.sub(value, step.instruction),
+    )
+
+
+def _lookup_hint(step: PlaybookStep) -> str:
+    assert step.lookup is not None
+    what = step.lookup.argument.replace("_", " ")
+    return f"I could not find a {what} in that. Please reply with the {what}, or 'cancel' to stop."
+
+
+def _lookup_failed(result: ToolResult, value: str) -> str:
+    if result.error == "not_found":
+        return f"No record was found for {value}. Check it and reply again, or 'cancel' to stop."
+    if result.error == "denied":
+        return f"You don't have access to {value}. Reply with another, or 'cancel' to stop."
+    return "The lookup did not work just now. Try again in a moment, or 'cancel' to stop."
 
 
 def _hint(step: PlaybookStep) -> str:

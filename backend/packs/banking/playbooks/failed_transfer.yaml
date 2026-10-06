@@ -1,35 +1,42 @@
 # Placeholder: step content must come from the bank's procedures.
+#
+# Step 1 looks the transfer up with the reference staff give; its status answers step 2, so the
+# procedure takes the right branch by itself. Steps quote the record as {1.field}.
 id: failed_transfer
 title: Failed transfer
 description: Customer reports a transfer that failed or did not arrive.
 steps:
   - order: 1
     title: Get the reference
-    instruction: Ask for the transfer reference and look up its status.
+    instruction: Ask the customer for the transfer reference (for example TX-0002) and enter it here.
     audience: [staff]
     expects: text
+    lookup: {tool: transactions.get_status, argument: reference, pattern: '(?i)\b(TX-\d+)\b'}
   - order: 2
     title: Check the status
-    instruction: Which status does the transfer show?
+    instruction: Which status does transfer {1.reference} show?
     audience: [staff]
     expects: choice
     choices: [failed, pending, completed]
+    answer_from: 1.status  # asked only if the record's status is none of the choices
     next_on: {failed: 3, pending: 4, completed: 5}
   - order: 3
     title: Explain the failure
-    instruction: Explain the failure reason and confirm the funds were returned.
+    instruction: >-
+      Transfer {1.reference} failed: {1.failure_reason} (code {1.failure_code}). Explain this to
+      the customer and confirm the funds were returned.
     audience: [staff, customer]
     expects: confirm
     next_on: {confirm: 6}  # each branch ends at the close, not in the next branch
   - order: 4
     title: Advise on timing
-    instruction: Tell the customer when pending transfers normally settle.
+    instruction: Transfer {1.reference} is still pending. Tell the customer when pending transfers normally settle.
     audience: [staff, customer]
     expects: confirm
     next_on: {confirm: 6}
   - order: 5
     title: Ask the beneficiary bank
-    instruction: Raise a trace with the beneficiary bank.
+    instruction: Transfer {1.reference} completed on {1.date}. Raise a trace with the beneficiary bank.
     audience: [staff]
     expects: confirm
     next_on: {confirm: 6}

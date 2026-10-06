@@ -131,12 +131,27 @@ async def tool_loop(ctx: FeatureContext) -> AsyncIterator[Event]:
 async def run_call(ctx: FeatureContext, call: ToolCall) -> AsyncIterator[Event]:
     """Make one call through the gateway; its result is added to `ctx.results`."""
     yield ToolStarted(call)
-    attributes = {"tool.name": call.name, "tool.arguments": ctx.trace.masked(call.arguments)}
-    with ctx.trace.span(call.name, "tool", **attributes) as span:
+    result = await call_tool(
+        ctx.gateway, ctx.trace, ctx.caller, ctx.feature, str(ctx.conversation_id), call
+    )
+    ctx.results.append(result)
+    yield ToolFinished(result)
+
+
+async def call_tool(
+    gateway: "ToolGateway",
+    trace: Trace,
+    caller: Caller,
+    feature: Feature,
+    conversation_id: str,
+    call: ToolCall,
+) -> ToolResult:
+    """One tool call through the gateway (feature check, schema, policy, audit), as a span.
+    A call the gateway rejects comes back as a failed result, not an exception."""
+    attributes = {"tool.name": call.name, "tool.arguments": trace.masked(call.arguments)}
+    with trace.span(call.name, "tool", **attributes) as span:
         try:
-            result = await ctx.gateway.execute(
-                ctx.caller, ctx.feature, call, str(ctx.conversation_id)
-            )
+            result = await gateway.execute(caller, feature, call, conversation_id)
         except (InvalidToolCall, UnknownTool) as exc:
             result = ToolResult(
                 call.id, ok=False, data={"problems": [str(exc)]}, error="invalid_arguments"
@@ -146,8 +161,7 @@ async def run_call(ctx: FeatureContext, call: ToolCall) -> AsyncIterator[Event]:
             output=span.text(result.data),
             citations=len(result.citations),
         )
-    ctx.results.append(result)
-    yield ToolFinished(result)
+    return result
 
 
 def use_tools_nudge(tools: list[ToolSpec]) -> str:

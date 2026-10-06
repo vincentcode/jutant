@@ -14,7 +14,7 @@ import yaml
 
 from core.packs.manifest import PackManifest
 from core.policy.rules import FieldRule, Rule
-from core.types import ArgumentSource, Feature, Playbook, PlaybookStep, Prefetch
+from core.types import ArgumentSource, Feature, Playbook, PlaybookStep, Prefetch, StepLookup
 
 SYSTEM_PROMPT = "prompts/system.md"
 
@@ -114,6 +114,16 @@ def _step(data: dict[str, Any]) -> PlaybookStep:
         expects=data.get("expects", "confirm"),
         choices=tuple(_key(c) for c in data.get("choices") or ()),
         next_on={_key(k): int(v) for k, v in (data.get("next_on") or {}).items()},
+        lookup=_lookup(data["lookup"]) if data.get("lookup") else None,
+        answer_from=str(data["answer_from"]) if data.get("answer_from") else None,
+    )
+
+
+def _lookup(data: dict[str, Any]) -> StepLookup:
+    return StepLookup(
+        tool=str(data["tool"]),
+        argument=str(data["argument"]),
+        pattern=str(data["pattern"]) if data.get("pattern") else None,
     )
 
 

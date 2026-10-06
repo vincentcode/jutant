@@ -1,5 +1,7 @@
 """Every write for playbooks. Keyword-only arguments, atomic."""
 
+from dataclasses import asdict
+from typing import Any
 from uuid import UUID
 
 from django.db import transaction
@@ -37,6 +39,8 @@ def upsert_playbook(*, definition: PlaybookDef, replace: bool = False) -> tuple[
             expects=s.expects,
             choices=list(s.choices),
             next_on=dict(s.next_on),
+            lookup=asdict(s.lookup) if s.lookup else None,
+            answer_from=s.answer_from or "",
         )
         for s in definition.steps
     )
@@ -52,6 +56,7 @@ def save_run(
     answers: dict[int, str],
     status: str,
     feature_id: str = "",
+    facts: dict[int, dict[str, Any]] | None = None,
 ) -> PlaybookRun:
     """Update the conversation's active run, or start a new one.
 
@@ -65,6 +70,7 @@ def save_run(
     run.playbook_id = playbook_id
     run.current_order = current_order
     run.answers = {str(order): answer for order, answer in answers.items()}
+    run.facts = {str(order): record for order, record in (facts or {}).items()}
     run.status = status
     run.feature_id = feature_id
     run.save()

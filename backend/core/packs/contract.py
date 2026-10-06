@@ -8,6 +8,8 @@
 - every playbook step has at least one audience, and each is one of the pack's audiences;
 - every `next_on` target is an existing step, and every choice step lists its choices;
 - no branch of a choice runs on, in step order, into another branch of the same choice;
+- a step lookup uses a tool of a playbook feature, with an argument the tool takes; answers
+  and quotes from looked-up records name an earlier lookup step;
 - `default_feature` exists;
 - every prompt file exists and is not empty;
 - every `document_extraction` feature has at least one extraction schema;
@@ -21,6 +23,7 @@ import re
 
 from core.packs.loader import SYSTEM_PROMPT, Pack
 from core.packs.manifest import PrefetchDef
+from core.playbooks.runner import PLACEHOLDER
 from core.types import Playbook, ToolSpec
 
 
@@ -34,6 +37,8 @@ def check(pack: Pack, tool_specs: list[ToolSpec]) -> list[str]:
     ruled = {r.tool for r in pack.rules}
     feature_ids = {f.id for f in m.features}
     specs = {s.name: s for s in tool_specs}
+    # Playbook lookups are made as calls of the feature running the playbook.
+    playbook_tools = {t for f in m.features if f.template == "guided_playbook" for t in f.tools}
 
     for f in m.features:
         for tool in f.tools:
@@ -76,6 +81,7 @@ def check(pack: Pack, tool_specs: list[ToolSpec]) -> list[str]:
             if step.expects == "choice" and not step.choices:
                 problems.append(f"{where}: a choice step needs choices")
         problems.extend(_branches_running_into_each_other(playbook))
+        problems.extend(_lookup_problems(playbook, specs, playbook_tools))
 
     if m.default_feature not in feature_ids:
         problems.append(f"default_feature {m.default_feature} is not a feature")
@@ -85,6 +91,42 @@ def check(pack: Pack, tool_specs: list[ToolSpec]) -> list[str]:
     asked = {q.get("feature") for q in pack.eval_questions}
     for feature_id in sorted(feature_ids - asked):
         problems.append(f"feature {feature_id} has no eval question")
+    return problems
+
+
+def _lookup_problems(
+    playbook: Playbook, specs: dict[str, ToolSpec], playbook_tools: set[str]
+) -> list[str]:
+    """Lookups name a tool a playbook feature may call, with an argument it takes; answers
+    and quotes from records name an earlier step that looks one up."""
+    problems = []
+    looked_up = set()
+    for step in sorted(playbook.steps, key=lambda s: s.order):
+        where = f"playbook {playbook.id} step {step.order}"
+        if step.answer_from:
+            order, _, name = step.answer_from.partition(".")
+            if step.expects != "choice":
+                problems.append(f"{where}: answer_from needs a choice step")
+            if not (order.isdigit() and int(order) in looked_up and name):
+                problems.append(
+                    f"{where}: answer_from {step.answer_from!r} must name an earlier lookup "
+                    "step and a field, like 1.status"
+                )
+        for order, _ in PLACEHOLDER.findall(step.title + step.instruction):
+            if int(order) not in looked_up:
+                problems.append(f"{where}: {{{order}.…}} quotes a step that looks nothing up")
+        if step.lookup is None:
+            continue
+        looked_up.add(step.order)
+        tool = step.lookup.tool
+        if tool not in playbook_tools:
+            problems.append(f"{where}: lookup tool {tool} is not a tool of a playbook feature")
+        elif tool in specs and step.lookup.argument not in specs[tool].input_schema.get(
+            "properties", {}
+        ):
+            problems.append(f"{where}: lookup tool {tool} takes no {step.lookup.argument}")
+        if step.lookup.pattern and (error := _regex_problem(step.lookup.pattern, 1)):
+            problems.append(f"{where}: lookup pattern: {error}")
     return problems
 
 

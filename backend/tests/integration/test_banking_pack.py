@@ -130,3 +130,38 @@ async def test_router_and_playbook_from_the_pack() -> None:
         )
     step = next(e for e in events if isinstance(e, PlaybookStepShown))
     assert (step.playbook_id, step.step.order) == ("blocked_card", 1)
+
+
+async def test_failed_transfer_procedure_looks_the_transfer_up_and_takes_its_branch() -> None:
+    """The pack's own procedure, on the real tools and the fake bank: the reference is looked
+    up, the transfer's status picks the branch, and the step quotes the failure reason."""
+    model = FakeModel(replies=[ModelReply("failed_transfer")])  # which procedure; no more
+    conversation = uuid4()
+    async with banking_assistant(model) as assistant:
+        await collect_events(
+            assistant.ask(staff(), conversation, "I had a failed transfer", "troubleshooting")
+        )
+        events = await collect_events(assistant.ask(staff(), conversation, "It is TX-0002"))
+
+    [step] = [e.step for e in events if isinstance(e, PlaybookStepShown)]
+    assert step.title == "Explain the failure"
+    assert "Beneficiary account closed (code E51)" in step.instruction
+    assert events[-1].answer.citations == (Citation("record", "Transaction", "TX-0002"),)
+    assert len(model.calls) == 1  # the record answered the status step, not the model
+
+
+async def test_the_procedure_cannot_look_up_another_branchs_transfer() -> None:
+    model = FakeModel(replies=[ModelReply("failed_transfer")])
+    conversation = uuid4()
+    kojo = staff("teller", "KSI-02")  # TX-0002 is on an ACC-01 account
+    async with banking_assistant(model) as assistant:
+        await collect_events(
+            assistant.ask(kojo, conversation, "failed transfer", "troubleshooting")
+        )
+        events = await collect_events(assistant.ask(kojo, conversation, "TX-0002"))
+
+    text = "".join(e.text for e in events if isinstance(e, TextDelta))
+    assert "You don't have access to TX-0002" in text
+    assert "Beneficiary" not in text  # nothing of the record is shown
+    [step] = [e.step for e in events if isinstance(e, PlaybookStepShown)]
+    assert step.order == 1

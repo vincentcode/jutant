@@ -33,6 +33,9 @@ class Step(models.Model):
     expects = models.CharField(max_length=16, choices=Expects.choices, default=Expects.CONFIRM)
     choices = models.JSONField(default=list, blank=True)
     next_on = models.JSONField(default=dict, blank=True)
+    # {tool, argument, pattern}: a record the step looks up with the reply
+    lookup = models.JSONField(null=True, blank=True)
+    answer_from = models.CharField(max_length=100, blank=True)  # e.g. "1.status"
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -53,6 +56,7 @@ class PlaybookRun(models.Model):
     playbook_id = models.CharField(max_length=100)  # playbook slug
     current_order = models.PositiveIntegerField()
     answers = models.JSONField(default=dict, blank=True)
+    facts = models.JSONField(default=dict, blank=True)  # step order -> the record it looked up
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.ACTIVE)
     feature_id = models.CharField(max_length=64, blank=True)  # the feature that started the run
     created_at = models.DateTimeField(auto_now_add=True)

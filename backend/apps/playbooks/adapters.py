@@ -7,7 +7,7 @@ from asgiref.sync import sync_to_async
 from apps.playbooks import selectors, services
 from apps.playbooks.models import Playbook as PlaybookRow
 from apps.playbooks.models import PlaybookRun
-from core.types import Playbook, PlaybookRunState, PlaybookStep
+from core.types import Playbook, PlaybookRunState, PlaybookStep, StepLookup
 
 
 class DjangoPlaybookStore:
@@ -34,6 +34,7 @@ class DjangoPlaybookStore:
             answers=state.answers,
             status=state.status,
             feature_id=state.feature_id,
+            facts=state.facts,
         )
 
 
@@ -52,6 +53,8 @@ def to_playbook(row: PlaybookRow) -> Playbook:
                 expects=s.expects,
                 choices=tuple(s.choices),
                 next_on={str(k): int(v) for k, v in s.next_on.items()},
+                lookup=StepLookup(**s.lookup) if s.lookup else None,
+                answer_from=s.answer_from or None,
             )
             for s in steps
         ),
@@ -65,4 +68,5 @@ def to_state(run: PlaybookRun) -> PlaybookRunState:
         answers={int(k): v for k, v in run.answers.items()},
         status=run.status,
         feature_id=run.feature_id,
+        facts={int(k): v for k, v in (run.facts or {}).items()},
     )

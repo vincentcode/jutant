@@ -102,14 +102,25 @@ class Feature:
 
 
 @dataclass(frozen=True)
+class StepLookup:
+    """A record a step fetches with the staff member's reply: a transfer by its reference."""
+
+    tool: str
+    argument: str  # the tool argument the reply fills
+    pattern: str | None = None  # the reply must contain it; its first group (or match) is used
+
+
+@dataclass(frozen=True)
 class PlaybookStep:
     order: int
     title: str
-    instruction: str
+    instruction: str  # may quote a looked-up record: {1.failure_reason}
     audience: tuple[str, ...]  # e.g. ("staff",) or ("staff", "customer")
     expects: Literal["confirm", "choice", "text", "none"] = "confirm"
     choices: tuple[str, ...] = ()
     next_on: dict[str, int] = field(default_factory=dict)  # choice -> step order
+    lookup: StepLookup | None = None
+    answer_from: str | None = None  # "1.status": a looked-up field that answers this choice
 
 
 @dataclass(frozen=True)
@@ -130,6 +141,7 @@ class PlaybookRunState:
     answers: dict[int, str] = field(default_factory=dict)
     status: PlaybookRunStatus = "active"
     feature_id: str = ""  # the feature that started the run, for history and audit
+    facts: dict[int, dict[str, Any]] = field(default_factory=dict)  # step order -> record
 
 
 @dataclass(frozen=True)

@@ -270,3 +270,96 @@ def test_a_branch_must_not_run_on_into_another_branch(pack_root: Path) -> None:
         "playbook reset step 2: the 'failed' branch of step 1 runs on into step 3, "
         "the 'pending' branch; end it with next_on"
     ) in found
+
+
+GUIDED = {
+    "id": "help",
+    "template": "guided_playbook",
+    "title": "Help",
+    "description": "Procedures.",
+    "prompt": "prompts/qa.md",
+    "tools": ["records.get"],
+}
+RECORD_SPECS = [
+    ToolSpec("documents.search", "", {"type": "object"}),
+    ToolSpec("records.get", "", {"type": "object", "properties": {"record_id": {}}}),
+]
+
+
+def lookup_playbook(**second_step) -> dict:
+    return {
+        **PLAYBOOK,
+        "steps": [
+            {
+                "order": 1,
+                "title": "Id",
+                "instruction": "Enter the id.",
+                "audience": ["staff"],
+                "expects": "text",
+                "lookup": {"tool": "records.get", "argument": "record_id"},
+            },
+            {
+                "order": 2,
+                "title": "State",
+                "instruction": "Is {1.state} right?",
+                "audience": ["staff"],
+                "expects": "choice",
+                "choices": ["open", "closed"],
+                "answer_from": "1.state",
+                **second_step,
+            },
+        ],
+    }
+
+
+def lookup_violations(pack_root: Path, playbook: dict, features=None) -> list[str]:
+    manifest = {**MANIFEST, "features": features or [*MANIFEST["features"], GUIDED]}
+    questions = [*QUESTIONS, {"id": "q3", "feature": "help"}]
+    return violations(
+        pack_root, RECORD_SPECS, manifest=manifest, playbook=playbook, questions=questions
+    )
+
+
+def test_a_lookup_playbook_loads_and_passes(pack_root: Path) -> None:
+    assert lookup_violations(pack_root, lookup_playbook()) == []
+    step = load_pack(pack_root).playbooks[0].steps[0]
+    assert step.lookup.tool == "records.get" and step.lookup.argument == "record_id"
+
+
+@pytest.mark.parametrize(
+    ("change", "problem"),
+    [
+        (
+            {"expects": "confirm", "choices": []},
+            "playbook reset step 2: answer_from needs a choice step",
+        ),
+        (
+            {"answer_from": "3.state"},
+            "playbook reset step 2: answer_from '3.state' must name an earlier lookup step "
+            "and a field, like 1.status",
+        ),
+        (
+            {"instruction": "Is {4.state} right?"},
+            "playbook reset step 2: {4.…} quotes a step that looks nothing up",
+        ),
+    ],
+    ids=["answer on a non-choice", "answer from no lookup", "quote of no lookup"],
+)
+def test_answers_and_quotes_must_come_from_a_lookup(pack_root: Path, change, problem) -> None:
+    assert problem in lookup_violations(pack_root, lookup_playbook(**change))
+
+
+def test_a_lookup_needs_a_tool_of_a_playbook_feature(pack_root: Path) -> None:
+    without_tool = [*MANIFEST["features"], {**GUIDED, "tools": []}]
+    found = lookup_violations(pack_root, lookup_playbook(), features=without_tool)
+    assert (
+        "playbook reset step 1: lookup tool records.get is not a tool of a playbook feature"
+    ) in found
+
+
+def test_a_lookup_argument_must_be_one_the_tool_takes(pack_root: Path) -> None:
+    playbook = lookup_playbook()
+    playbook["steps"][0]["lookup"] = {"tool": "records.get", "argument": "id"}
+    assert "playbook reset step 1: lookup tool records.get takes no id" in lookup_violations(
+        pack_root, playbook
+    )

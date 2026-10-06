@@ -102,6 +102,9 @@ features:
     title: Guided troubleshooting
     description: "Step-by-step help to fix a customer's problem: a blocked card, a dormant account, a failed transfer."
     prompt: prompts/troubleshooting.md
+    # For procedure steps that look a record up (failed_transfer). The model never calls them:
+    # procedures choose their own steps.
+    tools: [transactions.get_status]
     route:
       examples:
         - "The customer's card was declined at the ATM, help me sort it out."
