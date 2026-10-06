@@ -32,3 +32,46 @@ export function upload(conversationId: string, file: File): Promise<Upload> {
   body.append('file', file)
   return apiJson<Upload>(`/conversations/${conversationId}/upload`, { method: 'POST', body })
 }
+
+export type Feedback = Schemas['FeedbackOut']
+export type FeedbackReason = NonNullable<Schemas['FeedbackIn']['reason']>
+
+export const rateAnswer = (
+  conversationId: string,
+  messageId: string,
+  feedback: Schemas['FeedbackIn'],
+) =>
+  apiJson<Feedback>(`/conversations/${conversationId}/messages/${messageId}/feedback`, {
+    method: 'PUT',
+    body: JSON.stringify(feedback),
+  })
+
+export type AppInfo = Schemas['AppOut']
+export const appInfo = () => apiJson<AppInfo>('/app')
+
+export const searchConversations = (q: string) =>
+  apiJson<Conversation[]>(`/conversations${q ? `?q=${encodeURIComponent(q)}` : ''}`)
+
+export const renameConversation = (conversationId: string, title: string) =>
+  apiJson<Conversation>(`/conversations/${conversationId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ title }),
+  })
+
+export const deleteConversation = (conversationId: string) =>
+  apiFetch(`/conversations/${conversationId}`, { method: 'DELETE' })
+
+export type Home = Schemas['HomeOut']
+export type HomeCard = Schemas['HomeCardOut']
+export type QuickAction = Schemas['QuickActionOut']
+export type LibraryDocument = Schemas['DocumentOut']
+
+export const home = () => apiJson<Home>('/home')
+
+export const documents = (q: string, type = '') => {
+  const params = new URLSearchParams()
+  if (q) params.set('q', q)
+  if (type) params.set('type', type)
+  const query = params.toString()
+  return apiJson<LibraryDocument[]>(`/documents${query ? `?${query}` : ''}`)
+}

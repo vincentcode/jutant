@@ -6,7 +6,8 @@ import type { StreamEvent } from './events'
 
 export interface AskBody {
   text: string
-  feature_id?: string
+  feature_id?: string // used whatever the question
+  preferred_feature_id?: string // staff's quick action: used unless the question is clearly for another
   upload_id?: string
 }
 

@@ -1,21 +1,27 @@
+import { CircleAlert, CircleCheck, LoaderCircle } from 'lucide-react'
 import type { ToolActivityItem } from './useChatStream'
-import styles from './ToolActivity.module.css'
+import { toolLine } from './wording'
 
+const MARKS = {
+  running: <LoaderCircle aria-hidden className="size-3.5 animate-spin" />,
+  done: <CircleCheck aria-hidden className="size-3.5 text-accent" />,
+  problem: <CircleAlert aria-hidden className="size-3.5" />,
+}
+
+/** What the assistant is looking up, in staff's words: "Checking the transfer TX-0002…". */
 export function ToolActivity({ items }: { items: ToolActivityItem[] }) {
   if (items.length === 0) return null
   return (
-    <ul aria-label="Tool activity" className={styles.list}>
-      {items.map(({ call, result }) => (
-        <li key={call.id}>
-          {label(call.name)}: {result ? (result.ok ? 'done' : (result.error ?? 'failed').replace(/_/g, ' ')) : 'checking…'}
-        </li>
-      ))}
+    <ul aria-label="What the assistant checked" className="m-0 grid list-none gap-0.5 p-0 text-sm text-muted">
+      {items.map((item) => {
+        const { text, state } = toolLine(item)
+        return (
+          <li key={item.call.id} className={`flex items-center gap-1.5 ${state === 'problem' ? 'text-danger' : ''}`}>
+            {MARKS[state]}
+            {text}
+          </li>
+        )
+      })}
     </ul>
   )
-}
-
-/** `transactions.get_status` reads as "Transactions: get status". */
-function label(name: string): string {
-  const [server = '', tool = ''] = name.split('.')
-  return `${server.charAt(0).toUpperCase()}${server.slice(1)}: ${tool.replace(/_/g, ' ')}`
 }

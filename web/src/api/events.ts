@@ -27,6 +27,14 @@ export interface PlaybookStep {
   choices: string[]
 }
 
+/** A step as a turn showed it: `answered` when a looked-up record answered it. */
+export interface ShownStep {
+  playbook_id: string
+  playbook_title?: string
+  answered?: string | null
+  step: PlaybookStep
+}
+
 export interface Answer {
   text: string
   feature_id: string
@@ -35,10 +43,10 @@ export interface Answer {
 
 export type StreamEvent =
   | { event: 'queued'; data: { position: number } }
-  | { event: 'feature_selected'; data: { feature_id: string } }
-  | { event: 'tool_started'; data: { call: ToolCall } }
+  | { event: 'feature_selected'; data: { feature_id: string; switched_from?: string | null } }
+  | { event: 'tool_started'; data: { call: ToolCall; label?: string | null } }
   | { event: 'tool_finished'; data: { result: ToolResult } }
   | { event: 'text_delta'; data: { text: string } }
-  | { event: 'playbook_step'; data: { playbook_id: string; step: PlaybookStep } }
+  | { event: 'playbook_step'; data: ShownStep }
   | { event: 'completed'; data: { answer: Answer } }
   | { event: 'failed'; data: { reason: string } }

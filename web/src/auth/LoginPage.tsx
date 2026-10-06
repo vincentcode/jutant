@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { ApiError } from '../api/client'
 import { login } from '../api/endpoints'
-import styles from './LoginPage.module.css'
+import { useAppInfo } from '../app/appearance'
+import { LockKeyhole } from 'lucide-react'
 
 export function LoginPage() {
   const navigate = useNavigate()
@@ -12,6 +13,7 @@ export function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const app = useAppInfo()
 
   async function submit(event: FormEvent) {
     event.preventDefault()
@@ -32,16 +34,24 @@ export function LoginPage() {
   }
 
   return (
-    <main className={styles.page}>
-      <form className={styles.form} onSubmit={submit}>
-        <h1>Staff Assistant</h1>
-        <label>
+    <main className="grid min-h-dvh place-items-center px-4">
+      <form
+        className="grid w-full max-w-sm gap-3.5 rounded-2xl border border-line bg-surface p-7 shadow-sm"
+        onSubmit={submit}
+      >
+        <span className="flex size-10 items-center justify-center rounded-xl bg-accent-soft text-accent">
+          <LockKeyhole aria-hidden className="size-5" />
+        </span>
+        <h1 className="text-xl font-semibold">{app.name}</h1>
+        <p className="-mt-2 text-muted">Sign in with your work account.</p>
+        <label className="grid gap-1 text-sm font-medium">
           Username
-          <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" required />
+          <input className="field font-normal" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" required />
         </label>
-        <label>
+        <label className="grid gap-1 text-sm font-medium">
           Password
           <input
+            className="field font-normal"
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
@@ -50,11 +60,11 @@ export function LoginPage() {
           />
         </label>
         {error && (
-          <p role="alert" className={styles.error}>
+          <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">
             {error}
           </p>
         )}
-        <button type="submit" disabled={busy}>
+        <button type="submit" className="btn" disabled={busy}>
           {busy ? 'Signing in…' : 'Sign in'}
         </button>
       </form>
