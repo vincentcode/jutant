@@ -153,3 +153,26 @@ async def test_repeated_runs_show_a_question_that_passes_only_sometimes() -> Non
     ]
     assert report.unstable == ["q1"]
     assert report.as_dict()["unstable"] == ["q1"]
+
+
+async def test_a_follow_up_is_asked_after_its_earlier_turns_with_the_quick_action() -> None:
+    model = FakeModel(
+        replies=[
+            ModelReply("transaction_lookup"),  # routing the earlier turn
+            ModelReply("It failed."),  # nudge: no tool call yet
+            ModelReply("It failed."),
+            ModelReply(None, (ToolCall("1", "documents.search", {"query": "joint"}),)),
+            ModelReply("Each holder needs photo ID and proof of address."),
+        ]
+    )
+    rig = await make_rig(model, results={"documents.search": doc_result("KYC Policy", "4.2")})
+    question = {
+        **POLICY_Q,
+        "before": ["What happened to my transfer?"],
+        "prefer": "policy_qa",
+    }
+
+    [result] = (await run(pack(question), rig.orchestrator)).results
+
+    assert result.passed, result.checks
+    assert result.tools_called == ["documents.search"]  # only the scored turn's calls

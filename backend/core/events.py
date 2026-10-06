@@ -8,6 +8,7 @@ from core.types import Answer, PlaybookStep, ToolCall, ToolResult
 @dataclass(frozen=True)
 class FeatureSelected:
     feature_id: str
+    switched_from: str | None = None  # the feature staff preferred, if the question was not for it
 
 
 @dataclass(frozen=True)

@@ -33,6 +33,9 @@ UNREADABLE = "I found the document but could not read it. Please try again or op
 class DocumentExtractionTemplate:
     id = "document_extraction"
     requires_citation = False
+    # A summary is done in one answer: a follow-up asks about what the document says, so it is
+    # routed afresh rather than summarised again.
+    keeps_follow_ups = False
 
     async def run(self, ctx: FeatureContext) -> AsyncIterator[Event]:
         if not ctx.upload_text:
@@ -58,7 +61,7 @@ class DocumentExtractionTemplate:
 
 
 async def summarise_indexed(ctx: FeatureContext) -> AsyncIterator[Event]:
-    search = ToolCall(_call_id(), SEARCH_TOOL, {"query": ctx.question})
+    search = ToolCall(_call_id(), SEARCH_TOOL, {"query": ctx.lookup})
     async for event in run_call(ctx, search):
         yield event
     found = ctx.results[-1]

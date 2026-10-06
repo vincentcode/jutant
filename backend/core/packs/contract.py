@@ -55,6 +55,10 @@ def check(pack: Pack, tool_specs: list[ToolSpec]) -> list[str]:
                 problems.append(f"feature {f.id}: route pattern {pattern!r}: {error}")
         for p in f.prefetch:
             problems.extend(_prefetch_problems(f.id, f.tools, p, specs))
+        if f.ask_for and not f.prefetch:
+            problems.append(f"feature {f.id}: ask_for needs prefetch calls to ask for")
+        if f.follow_ups and f.follow_ups not in feature_ids:
+            problems.append(f"feature {f.id}: follow_ups names unknown feature {f.follow_ups}")
 
     for tool in sorted(tools - ruled):
         problems.append(f"tool {tool} has no access rule")

@@ -2,7 +2,9 @@
 
 Run against the fake system adapters and the real model, so a change of model or prompt can be
 compared with the last run. Each question is asked in a new conversation, as the role it names,
-with no feature picked, so routing is part of what is measured.
+with no feature picked, so routing is part of what is measured. A follow-up question's earlier
+turns (`before`) are asked first in the same conversation, and only its own answer is scored; a
+question with `prefer` is asked with that quick action chosen.
 """
 
 import time
@@ -52,9 +54,16 @@ async def ask(orchestrator: "Orchestrator", question: EvalQuestion) -> QuestionR
     data_reached_caller = False
     started = time.perf_counter()
     try:
-        async for event in orchestrator.ask(caller, conversation_id, question.question):
+        for earlier in question.before:
+            async for _ in orchestrator.ask(caller, conversation_id, earlier):
+                pass
+        started = time.perf_counter()  # the scored question's own time
+        asked = orchestrator.ask(
+            caller, conversation_id, question.question, preferred_feature_id=question.prefer
+        )
+        async for event in asked:
             match event:
-                case FeatureSelected(feature_id):
+                case FeatureSelected(feature_id, _):
                     result.routed_to = feature_id
                     feature_tools = set(orchestrator.registry.get(feature_id).tools)
                 case ToolStarted(call):

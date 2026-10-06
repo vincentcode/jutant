@@ -45,6 +45,12 @@ class FeatureContext:
     extraction_schemas: dict[str, list[str]] = field(default_factory=dict)
     results: list[ToolResult] = field(default_factory=list)  # filled by the tool loop
     trace: Trace = field(default_factory=Trace)  # the turn's span, for tool call spans
+    # What prefetch calls and searches read: the question, and for a follow-up the previous one.
+    lookup_text: str = ""
+
+    @property
+    def lookup(self) -> str:
+        return self.lookup_text or self.question
 
 
 class FeatureTemplate(Protocol):
@@ -76,7 +82,7 @@ async def tool_loop(ctx: FeatureContext) -> AsyncIterator[Event]:
     """
     messages = list(ctx.messages)
     tools = ctx.gateway.catalog.specs_for(ctx.feature.tools)
-    for call in planned_calls(ctx.feature, ctx.question):
+    for call in planned_calls(ctx.feature, ctx.lookup):
         messages.append(Message("assistant", "", tool_calls=(call,)))
         async for event in run_call(ctx, call):
             yield event

@@ -58,6 +58,10 @@ class FeatureDef(BaseModel):
     # Questions the client offers on its first screen. Unlike route examples, these are asked
     # for real, so they must be ones the deployment can answer.
     suggestions: list[str] = []
+    # What to ask for when a question gives none of what the prefetch calls need.
+    ask_for: str = ""
+    # Where follow-ups to this feature's answers go, if not to itself.
+    follow_ups: str = ""
 
 
 class Classification(BaseModel):

@@ -194,6 +194,7 @@ def to_message(row: MessageRow) -> Message:
         tool_call_id=row.tool_call_id or None,
         tool_calls=tuple(ToolCall(**c) for c in row.tool_calls),
         created_at=row.created_at,
+        feature_id=row.feature_id or None,
     )
 
 

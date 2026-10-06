@@ -266,3 +266,44 @@
   attributes: {branch: ACC-01}
   question: "Give me an overview of customer C1002."
   expect_denied: true  # the customer belongs to another branch
+
+# Follow-ups and quick actions: the earlier turns (before) are asked first in the same
+# conversation; prefer is the quick action staff left selected.
+
+- id: q31
+  feature: transaction_lookup
+  role: teller
+  attributes: {branch: ACC-01}
+  before: ["What is the status of transfer TX-0002?"]
+  question: "Why did it fail?"
+  expect_tool: transactions.get_status  # the reference comes from the previous question
+  expect_contains: ["closed"]
+  expect_citation: true
+
+- id: q32
+  feature: policy_qa
+  role: teller
+  attributes: {branch: ACC-01}
+  prefer: transaction_lookup  # left on Transaction, then asked a policy question
+  question: "What ID do joint account holders need?"
+  expect_tool: documents.search
+  expect_contains: ["proof of address"]
+  expect_citation: true
+
+- id: q33
+  feature: transaction_lookup
+  role: teller
+  attributes: {branch: ACC-01}
+  prefer: transaction_lookup
+  question: "Why did the transfer fail?"
+  expect_contains: ["reference"]  # asks which transfer, rather than "no source found"
+
+- id: q34
+  feature: policy_qa
+  role: credit_officer
+  attributes: {branch: ACC-01}
+  before: ["Summarise circular 14/2026 on dormant account reactivation."]
+  question: "Who has to approve it for accounts dormant over five years?"
+  expect_tool: documents.search
+  expect_contains: ["manager"]
+  expect_citation: true

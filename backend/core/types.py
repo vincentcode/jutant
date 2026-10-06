@@ -37,6 +37,7 @@ class Message:
     tool_call_id: str | None = None
     tool_calls: tuple[ToolCall, ...] = ()
     created_at: datetime | None = None
+    feature_id: str | None = None  # an answer's: the feature that gave it
 
 
 @dataclass(frozen=True)
@@ -97,6 +98,12 @@ class Feature:
     route_examples: tuple[str, ...] = ()  # questions this feature answers, matched by meaning
     prefetch: tuple[Prefetch, ...] = ()
     suggestions: tuple[str, ...] = ()  # questions offered on the client's first screen
+    # Asked when the question gives none of what the prefetch calls need (a reference, a
+    # customer number), instead of calling the model, which can only fail to find a source.
+    ask_for: str = ""
+    # Where follow-ups to this feature's answers go, if not to itself (after a summary, to the
+    # feature that answers questions about documents).
+    follow_ups: str = ""
 
     def allows(self, role: str) -> bool:
         return not self.roles or role in self.roles

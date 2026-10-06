@@ -41,8 +41,10 @@ def frame(name: str, data: Any) -> str:
 def to_frame(event: Event, labels: Mapping[str, str] | None = None) -> str:
     """`labels`: what each tool looks at, in staff's words, sent with each tool call."""
     match event:
-        case FeatureSelected(feature_id):
-            return frame("feature_selected", {"feature_id": feature_id})
+        case FeatureSelected(feature_id, switched_from):
+            return frame(
+                "feature_selected", {"feature_id": feature_id, "switched_from": switched_from}
+            )
         case ToolStarted(call):
             label = (labels or {}).get(call.name)
             return frame("tool_started", {"call": asdict(call), "label": label})

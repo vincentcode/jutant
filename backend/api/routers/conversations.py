@@ -168,7 +168,12 @@ async def ask(
 
     def events():
         return runtime.orchestrator.ask(
-            caller, conversation_id, body.text, body.feature_id, upload_text
+            caller,
+            conversation_id,
+            body.text,
+            body.feature_id,
+            upload_text,
+            preferred_feature_id=body.preferred_feature_id,
         )
 
     return StreamingResponse(

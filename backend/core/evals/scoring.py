@@ -25,6 +25,8 @@ class EvalQuestion:
     expect_contains: tuple[str, ...] = ()
     expect_citation: bool = False
     expect_denied: bool = False
+    before: tuple[str, ...] = ()  # asked first in the same conversation, unscored: a follow-up
+    prefer: str | None = None  # the quick action staff chose, which the question may override
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "EvalQuestion":
@@ -38,6 +40,8 @@ class EvalQuestion:
             expect_contains=tuple(data.get("expect_contains") or ()),
             expect_citation=bool(data.get("expect_citation")),
             expect_denied=bool(data.get("expect_denied")),
+            before=tuple(str(b) for b in data.get("before") or ()),
+            prefer=data.get("prefer"),
         )
 
 

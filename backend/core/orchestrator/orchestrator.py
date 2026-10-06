@@ -3,9 +3,13 @@
 1. Audit the question.
 2. If a playbook is in progress in this conversation, the reply goes to the playbook runner,
    unless staff picked a different feature, which ends the playbook.
-3. Otherwise resolve the feature: the one staff picked, or the router's choice. Check the caller's
-   role may use it.
-4. Run the feature's template (for most features, the tool loop).
+3. Otherwise resolve the feature: the one staff picked, or the router's choice. Staff's quick
+   action is kept unless another feature is clearly closer; for a follow-up, the feature that
+   answered last is kept unless the question clearly belongs elsewhere (see the router). Check
+   the caller's role may use it.
+4. Run the feature's template (for most features, the tool loop). A follow-up's lookups read
+   the previous question too. If the question gives nothing the feature's lookups need (no
+   reference, no customer number), the feature's `ask_for` question is the answer instead.
 5. Collect citations from the tool results. A template that requires citations never returns an
    uncited answer: it is replaced with a fixed "no source found" message. Such answers are held
    back until this check is done, rather than streamed as they arrive.
@@ -31,6 +35,8 @@ from core.events import (
     ToolFinished,
     ToolStarted,
 )
+from core.features.followup import is_follow_up, lookup_text, previous
+from core.features.prefetch import planned_calls
 from core.features.registry import FeatureRegistry
 from core.features.router import FeatureRouter
 from core.features.templates import TEMPLATES, FeatureContext, FeatureTemplate
@@ -98,9 +104,12 @@ class Orchestrator:
         text: str,
         feature_id: str | None = None,
         upload_text: str | None = None,
+        preferred_feature_id: str | None = None,
     ) -> AsyncIterator[Event]:
         """Answer one question, streaming events.
 
+        `feature_id` is used whatever the question; `preferred_feature_id` only unless the
+        question clearly belongs to another feature.
         Raises PolicyDenied before the first event if the caller may not use the feature.
         The whole turn is one trace: routing, model and tool calls, playbook steps.
         """
@@ -113,9 +122,10 @@ class Orchestrator:
             role=caller.role,
             input=root.text(text),
             feature=feature_id,
+            preferred=preferred_feature_id,
         ) as turn:
             async for event in self._ask(
-                caller, conversation_id, text, feature_id, upload_text, turn
+                caller, conversation_id, text, feature_id, upload_text, preferred_feature_id, turn
             ):
                 yield event
 
@@ -126,16 +136,23 @@ class Orchestrator:
         text: str,
         feature_id: str | None,
         upload_text: str | None,
+        preferred_feature_id: str | None,
         turn: Trace,
     ) -> AsyncIterator[Event]:
         timer = TurnTimer()
         await self.audit.record(
             caller,
             "question_asked",
-            {"conversation_id": str(conversation_id), "text": text, "feature_id": feature_id},
+            {
+                "conversation_id": str(conversation_id),
+                "text": text,
+                "feature_id": feature_id,
+                "preferred_feature_id": preferred_feature_id,
+            },
         )
         run = await self.playbooks.get_run(conversation_id)
-        if run is not None and feature_id and feature_id != run.feature_id:
+        chosen = feature_id or preferred_feature_id
+        if run is not None and chosen and chosen != run.feature_id:
             await self.runner.abandon(caller, conversation_id)  # staff moved on to something else
             run = None
         if run is not None:
@@ -156,11 +173,24 @@ class Orchestrator:
                 yield event
             return
 
-        feature = await self._resolve(caller, conversation_id, text, feature_id, turn)
-        timer.route_s = time.perf_counter() - timer.started
         history = await self.conversations.recent_messages(conversation_id, self.history_limit)
+        before = previous(history)
+        continuing = self._continued(before.feature_id, text)
+        feature = await self._resolve(
+            caller, conversation_id, text, feature_id, turn, preferred_feature_id, continuing
+        )
+        timer.route_s = time.perf_counter() - timer.started
         await self.conversations.append(conversation_id, Message("user", text))
-        yield FeatureSelected(feature.id)
+        switched = preferred_feature_id if preferred_feature_id not in (None, feature.id) else None
+        yield FeatureSelected(feature.id, switched)
+
+        lookup = lookup_text(text, before)
+        if not upload_text and _lacks_details(feature, lookup):
+            async for event in self._finish(
+                caller, conversation_id, feature.id, _say(feature.ask_for), timer=timer, trace=turn
+            ):
+                yield event
+            return
 
         template = self.templates[feature.template]
         ctx = FeatureContext(
@@ -168,6 +198,7 @@ class Orchestrator:
             conversation_id=conversation_id,
             feature=feature,
             question=text,
+            lookup_text=lookup,
             messages=build_messages(self.system_prompt, feature, history, text),
             model=TimedModel(TracedModel(self.model, turn), timer),
             gateway=self.gateway,
@@ -216,6 +247,20 @@ class Orchestrator:
 
         return lookup
 
+    def _continued(self, feature_id: str | None, text: str) -> str | None:
+        """For a follow-up, the feature that answered last, or the one its pack sends follow-ups
+        to; none if its template does not carry on (a summary)."""
+        if feature_id is None or not is_follow_up(text):
+            return None
+        try:
+            feature = self.registry.get(feature_id)
+        except KeyError:
+            return None  # a feature the pack no longer has
+        if feature.follow_ups:
+            return feature.follow_ups
+        template = self.templates.get(feature.template)
+        return feature_id if getattr(template, "keeps_follow_ups", True) else None
+
     async def _resolve(
         self,
         caller: Caller,
@@ -223,6 +268,8 @@ class Orchestrator:
         text: str,
         feature_id: str | None,
         turn: Trace | None = None,
+        prefer: str | None = None,
+        continuing: str | None = None,
     ) -> Feature:
         turn = turn or Trace()
         detail: dict[str, object] = {"conversation_id": str(conversation_id)}
@@ -235,12 +282,24 @@ class Orchestrator:
         else:
             with turn.span("route", "chain") as routing:
                 try:
-                    route = await self.router.route(caller, text, TracedModel(self.model, routing))
+                    route = await self.router.route(
+                        caller, text, TracedModel(self.model, routing), prefer, continuing
+                    )
                 except LookupError:
                     raise PolicyDenied(f"no features for role {caller.role}") from None
-                routing.set(feature=route.feature.id, routed_by=route.by, score=route.score)
+                routing.set(
+                    feature=route.feature.id,
+                    routed_by=route.by,
+                    score=route.score,
+                    prefer=prefer,
+                    continuing=continuing,
+                )
             feature = route.feature
             detail["chosen_by"] = route.by  # pattern, meaning, model... to find misroutes
+            if prefer:
+                detail["preferred"] = prefer
+            if continuing:
+                detail["continuing"] = continuing
             if route.score is not None:
                 detail["score"] = route.score
         if not feature.allows(caller.role):
@@ -362,6 +421,15 @@ class Orchestrator:
                 "timing": timer.as_detail(),  # where the turn's time went
             },
         )
+
+
+def _lacks_details(feature: Feature, text: str) -> bool:
+    """The feature asks for what its lookups need, and the question gives none of it."""
+    return bool(feature.ask_for and feature.prefetch and not planned_calls(feature, text))
+
+
+async def _say(text: str) -> AsyncIterator[Event]:
+    yield TextDelta(text)
 
 
 def _timing(timer: TurnTimer) -> dict[str, int]:

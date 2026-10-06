@@ -105,6 +105,7 @@ features:
     title: Transaction lookup
     suggestions: ["Why did transfer TX-0002 fail?"]  # offered on the first screen; must be answerable
     description: "One account's transactions, or one transfer by its reference: activity, status, why it failed."
+    ask_for: "Which transfer or account? Give me the transfer reference (for example TX-0002) or the 10-digit account number."
     prompt: prompts/transaction_lookup.md
     tools: [transactions.list, transactions.get_status]
     route:
@@ -162,12 +163,15 @@ features:
     template: document_extraction
     title: Document summarisation and extraction
     description: "Summarise a circular or other document, or read the fields of an uploaded file."
+    follow_ups: policy_qa  # a question after a summary asks what the document says
     prompt: prompts/document_summary_extraction.md
     tools: [documents.search, documents.get]
     route:
       # Embeddings match a topic, not an intent: "summarise the circular on dormant accounts"
       # scored closest to troubleshooting's dormant-account example. The words decide instead.
-      patterns: ['(?i)\bsummari[sz]e\b', '(?i)\b(circular|memo)\b']
+      # Not "circular" or "memo" alone: "is there a penalty for breaking the circular?" asks
+      # what it says (policy_qa), not for a summary.
+      patterns: ['(?i)\bsummari[sz]e\b', '(?i)\bkey points\b', '(?i)\b(circular|memo)\b.*\bchange']
       examples:
         - "Give me the key points of the latest circular on cash limits."
         - "Read the details from this payslip."
@@ -177,6 +181,7 @@ features:
     title: Customer 360 summary
     suggestions: ["Give me a summary of customer C1001."]  # offered on the first screen; must be answerable
     description: "Overview of one customer by customer number: their accounts, balances, recent activity and open requests."
+    ask_for: "Which customer? Give me their customer number, for example C1001."
     prompt: prompts/customer_360.md
     tools: [services.customer_summary]
     roles: [customer_service, credit_officer, branch_manager]

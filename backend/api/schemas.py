@@ -125,7 +125,10 @@ class MessageOut(BaseModel):
 
 class AskRequest(BaseModel):
     text: str = Field(min_length=1, max_length=MAX_QUESTION_CHARS)
-    feature_id: str | None = None
+    feature_id: str | None = None  # used whatever the question
+    # Staff's quick action: used unless the question clearly belongs to another feature. One the
+    # role may not use is ignored.
+    preferred_feature_id: str | None = Field(default=None, max_length=64)
     upload_id: UUID | None = None
 
 

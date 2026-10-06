@@ -33,7 +33,11 @@ class InMemoryConversationStore:
 
     async def recent_messages(self, conversation_id: UUID, limit: int) -> list[Message]:
         history = [
-            replace(stored.message, content=as_text(stored.message.content, stored.steps))
+            replace(
+                stored.message,
+                content=as_text(stored.message.content, stored.steps),
+                feature_id=stored.feature_id,
+            )
             for stored in self.messages.get(conversation_id, [])
         ]
         return history[-limit:] if limit else []

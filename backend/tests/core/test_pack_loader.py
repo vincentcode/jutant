@@ -381,3 +381,13 @@ def test_home_cards_and_quick_actions_must_start_real_features(pack_root: Path) 
         "home card 'Look up': unknown feature nope",
         "quick action 'X': unknown feature missing",
     ]
+
+
+def test_ask_for_needs_prefetch_calls(pack_root: Path) -> None:
+    found = violations(pack_root, manifest=with_feature(ask_for="Which one?", prefetch=[]))
+    assert "feature qa: ask_for needs prefetch calls to ask for" in found
+
+
+def test_follow_ups_must_name_a_feature(pack_root: Path) -> None:
+    found = violations(pack_root, manifest=with_feature(follow_ups="nope"))
+    assert "feature qa: follow_ups names unknown feature nope" in found
