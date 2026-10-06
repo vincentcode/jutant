@@ -271,7 +271,7 @@ class Orchestrator:
         tool_started = 0.0
         text = ""  # the answer so far, with paragraph breaks
         sent = 0  # how much of it has been passed on
-        steps: list[str] = []
+        steps: list[PlaybookStepShown] = []
         calls: list[ToolCall] = []
         try:
             async for event in events:
@@ -307,9 +307,7 @@ class Orchestrator:
                         expects=event.step.expects,
                     ):
                         pass
-                    steps.append(
-                        f"Step {event.step.order}: {event.step.title}. {event.step.instruction}"
-                    )
+                    steps.append(event)
                 yield event
         except ModelUnavailable:
             trace.fail(MODEL_UNAVAILABLE)
@@ -326,10 +324,14 @@ class Orchestrator:
         if len(text) > sent:
             yield TextDelta(text[sent:], continues=sent > 0)
 
-        # History keeps the playbook steps too, so later turns have the context they need.
-        stored = "\n\n".join(p for p in (text, *steps) if p)
+        # The steps are kept with the answer, for the client to show and the model to read.
         await self.conversations.append(
-            conversation_id, Message("assistant", stored), feature_id or None, citations
+            conversation_id,
+            Message("assistant", text),
+            feature_id or None,
+            citations,
+            tuple(steps),
+            trace.carrier(),  # so feedback on this answer can find its trace
         )
         await self._audit_answer(
             caller,

@@ -35,6 +35,7 @@ async def test_a_turn_streams_every_event_in_order() -> None:
     assert set(names[3:-1]) == {"text_delta"} and len(names[3:-1]) > 1  # streamed in pieces
     streamed = "".join(data["text"] for name, data in events if name == "text_delta")
     assert streamed == "It failed: beneficiary account closed."
+    assert events[1][1]["label"] == "the transfer"  # in staff's words, from the pack
     finished = events[2][1]["result"]
     assert finished["ok"] and "data" not in finished  # raw tool data stays on the server
     completed = events[-1][1]["answer"]
@@ -49,10 +50,19 @@ async def test_routed_playbook_streams_its_step() -> None:
     await sync_to_async(call_command)("load_pack_playbooks")
     async with api(ModelReply("troubleshooting"), ModelReply("blocked_card")) as client:
         await client.login("ama")
-        events = await client.ask(await client.conversation(), text="The card is blocked")
+        conversation = await client.conversation()
+        events = await client.ask(conversation, text="The card is blocked")
+        history = (await client.http.get(f"/api/conversations/{conversation}/messages")).json()
     step = next(data for name, data in events if name == "playbook_step")
-    assert step["playbook_id"] == "blocked_card"
+    assert step["playbook_id"] == "blocked_card" and step["playbook_title"] == "Blocked card"
     assert step["step"]["order"] == 1 and step["step"]["expects"] == "confirm"
+    # The history keeps it as a step, for the client to show as a card after a reload.
+    [kept] = history[-1]["steps"]
+    assert (kept["title"], kept["playbook_title"], kept["answered"]) == (
+        "Verify the customer",
+        "Blocked card",
+        None,
+    )
 
 
 async def test_upload_then_extract_fields() -> None:
@@ -76,8 +86,8 @@ async def test_upload_then_extract_fields() -> None:
             upload_id=upload["upload_id"],
         )
     text = events[-1][1]["answer"]["text"]
-    assert "- Full name: AMA MENSAH" in text
-    assert "- Expiry date: not found" in text
+    assert "| Full name | AMA MENSAH |" in text
+    assert "| Expiry date | *not found* |" in text
 
 
 async def test_unreadable_uploads_and_unknown_upload_ids() -> None:

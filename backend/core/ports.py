@@ -2,7 +2,7 @@
 
 from collections.abc import AsyncIterator, Mapping
 from datetime import datetime
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 from uuid import UUID
 
 from core.types import (
@@ -19,6 +19,9 @@ from core.types import (
     ToolSpec,
 )
 
+if TYPE_CHECKING:
+    from core.events import PlaybookStepShown
+
 AUDIT_EVENTS = (
     "question_asked",
     "feature_routed",
@@ -29,6 +32,8 @@ AUDIT_EVENTS = (
     "playbook_started",
     "playbook_step",
     "document_uploaded",
+    "feedback_given",
+    "conversation_deleted",
 )
 
 
@@ -63,7 +68,13 @@ class ConversationStore(Protocol):
         message: Message,
         feature_id: str | None = None,
         citations: tuple[Citation, ...] = (),
-    ) -> None: ...
+        steps: tuple["PlaybookStepShown", ...] = (),
+        trace_context: Mapping[str, str] | None = None,
+    ) -> None:
+        """`steps` are the playbook steps the turn showed. They are kept as steps, and read
+        back by `recent_messages` as part of the message's text. `trace_context` is the
+        turn's trace, so feedback on the answer can be attached to it."""
+        ...
 
 
 class PlaybookStore(Protocol):

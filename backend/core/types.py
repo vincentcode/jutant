@@ -96,6 +96,7 @@ class Feature:
     route_patterns: tuple[str, ...] = ()  # a match routes here without asking the model
     route_examples: tuple[str, ...] = ()  # questions this feature answers, matched by meaning
     prefetch: tuple[Prefetch, ...] = ()
+    suggestions: tuple[str, ...] = ()  # questions offered on the client's first screen
 
     def allows(self, role: str) -> bool:
         return not self.roles or role in self.roles

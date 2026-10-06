@@ -11,6 +11,49 @@ mcp_servers:
   - pack: transactions
   - pack: services
 
+# The client's home screen: starting points and the quick actions in the question box. Each
+# starts a feature; staff see only those their role may use. Icons are Lucide icon names.
+home:
+  cards:
+    - title: Investigate a transaction
+      description: Look up transfers and account activity, and why a payment failed.
+      feature: transaction_lookup
+      icon: landmark
+      label: Payments
+    - title: Find customer information
+      description: Accounts, balances, recent activity and open requests for one customer.
+      feature: customer_360
+      icon: user-round
+      label: Customer Ops
+    - title: Ask about procedures
+      description: Policies, KYC rules and what a customer must provide.
+      feature: policy_qa
+      icon: book-open
+      label: Knowledge
+    - title: Fix a customer's problem
+      description: Step-by-step help for a blocked card, a dormant account or a failed transfer.
+      feature: troubleshooting
+      icon: life-buoy
+      label: Procedures
+  quick_actions:
+    - {label: Transaction, feature: transaction_lookup}
+    - {label: Customer, feature: customer_360}
+    - {label: Policy, feature: policy_qa}
+    - {label: Product, feature: product_lookup}
+    - {label: Document, feature: document_summary_extraction}
+
+# What each tool looks at, in staff's words. The client shows "Checking the transfer…",
+# "Checked the transfer", "Not allowed: the account's transactions".
+tool_labels:
+  documents.search: the bank's documents
+  documents.get: the document
+  transactions.list: the account's transactions
+  transactions.get_status: the transfer
+  services.search_products: the product catalogue
+  services.get_product: the product's details
+  services.get_requirements: the request's requirements
+  services.customer_summary: the customer's accounts
+
 classifications:
   - {label: public, roles: all}
   - {label: internal, roles: [teller, customer_service, credit_officer, branch_manager]}
@@ -25,6 +68,7 @@ features:
   - id: policy_qa
     template: document_qa
     title: Policy and procedure Q&A
+    suggestions: ["What ID do joint account holders need?"]  # offered on the first screen; must be answerable
     description: "Rules in the bank's policies and procedures: what ID or documents a customer must provide, KYC, account rules, compliance."
     prompt: prompts/policy_qa.md
     tools: [documents.search]
@@ -42,6 +86,7 @@ features:
   - id: product_lookup
     template: record_lookup
     title: Product lookup
+    suggestions: ["What is the interest rate on Standard Savings?"]  # offered on the first screen; must be answerable
     description: "Facts about a named bank product: its interest rate, fees, eligibility and required documents."
     prompt: prompts/product_lookup.md
     tools: [services.search_products, services.get_product]
@@ -58,6 +103,7 @@ features:
   - id: transaction_lookup
     template: record_lookup
     title: Transaction lookup
+    suggestions: ["Why did transfer TX-0002 fail?"]  # offered on the first screen; must be answerable
     description: "One account's transactions, or one transfer by its reference: activity, status, why it failed."
     prompt: prompts/transaction_lookup.md
     tools: [transactions.list, transactions.get_status]
@@ -75,6 +121,7 @@ features:
   - id: code_explainer
     template: document_qa
     title: Error and status code explainer
+    suggestions: ["What does error code E51 mean?"]  # offered on the first screen; must be answerable
     description: "What a system error or status code (such as E51) means and what to do next."
     prompt: prompts/code_explainer.md
     tools: [documents.search]
@@ -100,6 +147,7 @@ features:
   - id: troubleshooting
     template: guided_playbook
     title: Guided troubleshooting
+    suggestions: ["A customer's card is blocked. Walk me through it."]  # offered on the first screen; must be answerable
     description: "Step-by-step help to fix a customer's problem: a blocked card, a dormant account, a failed transfer."
     prompt: prompts/troubleshooting.md
     # For procedure steps that look a record up (failed_transfer). The model never calls them:
@@ -127,6 +175,7 @@ features:
   - id: customer_360
     template: record_summary
     title: Customer 360 summary
+    suggestions: ["Give me a summary of customer C1001."]  # offered on the first screen; must be answerable
     description: "Overview of one customer by customer number: their accounts, balances, recent activity and open requests."
     prompt: prompts/customer_360.md
     tools: [services.customer_summary]

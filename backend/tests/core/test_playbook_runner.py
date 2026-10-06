@@ -134,4 +134,8 @@ async def test_playbook_steps_are_kept_in_history() -> None:
     conversation_id = uuid4()
     await start_blocked_card(rig, conversation_id)
     stored = rig.conversations.messages[conversation_id][-1]
-    assert "Step 1: Verify." in stored.message.content
+    # Kept as a step, for the client to show as one, and as text for the model's history.
+    assert [s.step.order for s in stored.steps] == [1]
+    assert stored.steps[0].playbook_title == "Blocked card"
+    [as_read] = (await rig.conversations.recent_messages(conversation_id, 6))[-1:]
+    assert "Step 1: Verify." in as_read.content

@@ -1,5 +1,7 @@
 """Implements core.ports.DocumentStore on the knowledge tables."""
 
+from dataclasses import dataclass
+from datetime import date, datetime
 from uuid import UUID
 
 from asgiref.sync import sync_to_async
@@ -45,3 +47,26 @@ class DjangoDocumentStore:
         if document is None:
             raise KeyError(str(document_id))
         return DocumentText(document.id, document.title, document.classification, document.text)
+
+
+@dataclass(frozen=True)
+class LibraryEntry:
+    id: UUID
+    title: str
+    doc_type: str
+    effective_date: date | None
+    indexed_at: datetime
+
+
+class DocumentLibrary:
+    """The documents staff may browse in the Knowledge panel."""
+
+    async def list(
+        self, classifications: list[str], search: str = "", doc_type: str = ""
+    ) -> list[LibraryEntry]:
+        rows = await sync_to_async(selectors.library)(
+            classifications=classifications, search=search, doc_type=doc_type
+        )
+        return [
+            LibraryEntry(r.id, r.title, r.doc_type, r.effective_date, r.created_at) for r in rows
+        ]

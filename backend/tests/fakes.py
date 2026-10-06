@@ -1,10 +1,13 @@
 """In-memory implementations of the core ports, for core tests without Django."""
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
+from core.events import PlaybookStepShown
+from core.playbooks.history import as_text
 from core.types import Caller, Citation, Message, Playbook, PlaybookRunState
 
 
@@ -13,6 +16,8 @@ class StoredMessage:
     message: Message
     feature_id: str | None
     citations: tuple[Citation, ...]
+    steps: tuple[PlaybookStepShown, ...] = ()
+    trace_context: dict[str, str] | None = None
 
 
 class InMemoryConversationStore:
@@ -27,7 +32,10 @@ class InMemoryConversationStore:
         return conversation_id
 
     async def recent_messages(self, conversation_id: UUID, limit: int) -> list[Message]:
-        history = [stored.message for stored in self.messages.get(conversation_id, [])]
+        history = [
+            replace(stored.message, content=as_text(stored.message.content, stored.steps))
+            for stored in self.messages.get(conversation_id, [])
+        ]
         return history[-limit:] if limit else []
 
     async def append(
@@ -36,8 +44,10 @@ class InMemoryConversationStore:
         message: Message,
         feature_id: str | None = None,
         citations: tuple[Citation, ...] = (),
+        steps: tuple[PlaybookStepShown, ...] = (),
+        trace_context: Mapping[str, str] | None = None,
     ) -> None:
-        stored = StoredMessage(message, feature_id, citations)
+        stored = StoredMessage(message, feature_id, citations, steps, dict(trace_context or {}))
         self.messages.setdefault(conversation_id, []).append(stored)
 
 

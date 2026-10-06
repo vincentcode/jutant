@@ -363,3 +363,21 @@ def test_a_lookup_argument_must_be_one_the_tool_takes(pack_root: Path) -> None:
     assert "playbook reset step 1: lookup tool records.get takes no id" in lookup_violations(
         pack_root, playbook
     )
+
+
+def test_tool_labels_must_name_offered_tools(pack_root: Path) -> None:
+    manifest = {**MANIFEST, "tool_labels": {"records.get": "the record", "records.nope": "x"}}
+    found = violations(pack_root, manifest=manifest)
+    assert found == ["tool_labels names records.nope, which no pack server offers"]
+
+
+def test_home_cards_and_quick_actions_must_start_real_features(pack_root: Path) -> None:
+    home = {
+        "cards": [{"title": "Look up", "description": "d", "feature": "nope"}],
+        "quick_actions": [{"label": "Q", "feature": "qa"}, {"label": "X", "feature": "missing"}],
+    }
+    found = violations(pack_root, manifest={**MANIFEST, "home": home})
+    assert found == [
+        "home card 'Look up': unknown feature nope",
+        "quick action 'X': unknown feature missing",
+    ]

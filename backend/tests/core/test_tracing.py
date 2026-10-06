@@ -176,3 +176,15 @@ async def test_a_tool_call_hands_its_span_to_the_server() -> None:
     await collect_events(rig.orchestrator.ask(teller(), uuid4(), "KYC?", "policy_qa"))
     [tool_span] = tracer.named("documents.search")
     assert rig.tools.calls[0].trace_context == {"traceparent": f"span:{id(tool_span)}"}
+
+
+async def test_an_answer_is_stored_with_its_turn_s_trace_for_feedback() -> None:
+    model = FakeModel(replies=[ModelReply("Both need ID.")])
+    rig, tracer = await traced_rig(
+        model, results={"documents.search": doc_result("KYC Policy", "4.2")}, features=searched()
+    )
+    conversation = uuid4()
+    await collect_events(rig.orchestrator.ask(teller(), conversation, "KYC?", "policy_qa"))
+    [turn] = tracer.named("turn")
+    answer = rig.conversations.messages[conversation][-1]
+    assert answer.trace_context == turn.carrier()

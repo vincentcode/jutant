@@ -34,6 +34,8 @@ class TextDelta:
 class PlaybookStepShown:
     playbook_id: str
     step: PlaybookStep
+    playbook_title: str = ""  # for "Failed transfer · step 3"
+    answered: str | None = None  # the step was answered from a looked-up record, with this
 
 
 @dataclass(frozen=True)

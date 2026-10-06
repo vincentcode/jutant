@@ -143,7 +143,10 @@ async def test_failed_transfer_procedure_looks_the_transfer_up_and_takes_its_bra
         )
         events = await collect_events(assistant.ask(staff(), conversation, "It is TX-0002"))
 
-    [step] = [e.step for e in events if isinstance(e, PlaybookStepShown)]
+    answered, step = [e for e in events if isinstance(e, PlaybookStepShown)]
+    assert (answered.step.title, answered.answered) == ("Check the status", "failed")
+    assert answered.playbook_title == "Failed transfer"
+    step = step.step
     assert step.title == "Explain the failure"
     assert "Beneficiary account closed (code E51)" in step.instruction
     assert events[-1].answer.citations == (Citation("record", "Transaction", "TX-0002"),)

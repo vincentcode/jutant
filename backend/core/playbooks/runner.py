@@ -59,7 +59,9 @@ class PlaybookRunner:
             yield TextDelta(NO_STEPS)
             return
         state = PlaybookRunState(playbook_id, steps[0].order, {}, "active", feature_id)
-        async for event in self._show(caller, conversation_id, state, steps, steps[0]):
+        async for event in self._show(
+            caller, conversation_id, state, steps, steps[0], playbook.title
+        ):
             yield event
 
     async def abandon(self, caller: Caller, conversation_id: UUID) -> None:
@@ -93,14 +95,14 @@ class PlaybookRunner:
         answer = await self._interpret(current, text)
         if answer is None:
             yield TextDelta(_hint(current))
-            yield PlaybookStepShown(state.playbook_id, _filled(current, state))
+            yield PlaybookStepShown(state.playbook_id, _filled(current, state), playbook.title)
             return
 
         if current.lookup is not None and lookup is not None:
             value = _looked_up_value(current, text)
             if value is None:
                 yield TextDelta(_lookup_hint(current))
-                yield PlaybookStepShown(state.playbook_id, _filled(current, state))
+                yield PlaybookStepShown(state.playbook_id, _filled(current, state), playbook.title)
                 return
             call = ToolCall(
                 f"step_{uuid4().hex[:8]}", current.lookup.tool, {current.lookup.argument: value}
@@ -110,7 +112,7 @@ class PlaybookRunner:
             yield ToolFinished(result)
             if not result.ok or not isinstance(result.data, dict):
                 yield TextDelta(_lookup_failed(result, value))
-                yield PlaybookStepShown(state.playbook_id, _filled(current, state))
+                yield PlaybookStepShown(state.playbook_id, _filled(current, state), playbook.title)
                 return
             state = replace(state, facts={**state.facts, current.order: result.data})
             answer = value
@@ -118,7 +120,9 @@ class PlaybookRunner:
         state = replace(state, answers={**state.answers, current.order: answer})
         await self._audit_step(caller, conversation_id, state, answer)
         following = next_step(steps, current, answer)
-        async for event in self._show(caller, conversation_id, state, steps, following):
+        async for event in self._show(
+            caller, conversation_id, state, steps, following, playbook.title
+        ):
             yield event
 
     async def _show(
@@ -128,18 +132,19 @@ class PlaybookRunner:
         state: PlaybookRunState,
         steps: tuple[PlaybookStep, ...],
         step: PlaybookStep | None,
+        title: str = "",
     ) -> AsyncIterator[Event]:
         """Show `step`. Steps that need no reply (`none`), and choices a looked-up record
         answers, are shown or answered in turn, until one needs the staff member."""
         while step is not None:
             if step.expects == "none":
-                yield PlaybookStepShown(state.playbook_id, _filled(step, state))
+                yield PlaybookStepShown(state.playbook_id, _filled(step, state), title)
                 step = next_step(steps, step, "")
                 continue
             answer = _answer_from_record(step, state)
             if answer is None:
                 break
-            yield TextDelta(f"{step.title}: {answer.replace('_', ' ')} (from the record).")
+            yield PlaybookStepShown(state.playbook_id, _filled(step, state), title, answer)
             state = replace(
                 state, current_order=step.order, answers={**state.answers, step.order: answer}
             )
@@ -151,7 +156,7 @@ class PlaybookRunner:
             return
         state = replace(state, current_order=step.order)
         await self.store.save_run(conversation_id, state)
-        yield PlaybookStepShown(state.playbook_id, _filled(step, state))
+        yield PlaybookStepShown(state.playbook_id, _filled(step, state), title)
 
     async def _interpret(self, step: PlaybookStep, text: str) -> str | None:
         """The answer `text` gives to `step`, or None if it does not answer it."""

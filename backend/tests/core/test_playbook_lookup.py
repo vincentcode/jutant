@@ -94,7 +94,8 @@ async def started_run():
 
 
 def shown(events) -> list[PlaybookStep]:
-    return [e.step for e in events if isinstance(e, PlaybookStepShown)]
+    """The steps shown for staff to act on (not those the record answered)."""
+    return [e.step for e in events if isinstance(e, PlaybookStepShown) and not e.answered]
 
 
 async def test_the_reference_is_looked_up_and_its_status_picks_the_branch() -> None:
@@ -106,11 +107,8 @@ async def test_the_reference_is_looked_up_and_its_status_picks_the_branch() -> N
 
     [call] = [e.call for e in events if isinstance(e, ToolStarted)]
     assert (call.name, call.arguments) == ("transactions.get_status", {"reference": "tx-0002"})
-    assert any(
-        "Check the status: failed (from the record)." in e.text
-        for e in events
-        if isinstance(e, TextDelta)
-    )
+    answered = [e for e in events if isinstance(e, PlaybookStepShown) and e.answered]
+    assert [(e.step.order, e.answered) for e in answered] == [(2, "failed")]  # by the record
     [step] = shown(events)
     assert step.order == 3  # the failed branch, without asking
     assert step.instruction == "Failed: Beneficiary account closed (code E51)."

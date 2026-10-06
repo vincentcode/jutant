@@ -100,3 +100,18 @@ def find_by_checksum(*, checksum: str) -> Document | None:
 def indexed_documents() -> list[Document]:
     """Every indexed document, for re-chunking and re-embedding."""
     return list(Document.objects.filter(status=Document.Status.INDEXED).order_by("created_at"))
+
+
+def library(
+    *, classifications: list[str], search: str = "", doc_type: str = "", limit: int = 200
+) -> list[Document]:
+    """Indexed documents with one of the labels, newest first; optionally by title words or
+    type. No text: this is for browsing."""
+    rows = Document.objects.filter(
+        status=Document.Status.INDEXED, classification__in=classifications
+    ).defer("text")
+    if search:
+        rows = rows.filter(title__icontains=search)
+    if doc_type:
+        rows = rows.filter(doc_type=doc_type)
+    return list(rows.order_by("-created_at")[:limit])

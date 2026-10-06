@@ -4,7 +4,7 @@ This is the only place that decides which implementation (Django store, Ollama, 
 stands behind each interface the core depends on. Tests build the orchestrator with fakes.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any
 
@@ -13,6 +13,7 @@ from django.conf import settings
 from apps.audit.adapters import DjangoAuditSink
 from apps.conversation.adapters import DjangoConversationStore
 from apps.identity.adapters import DjangoIdentityProvider, LoginLimits
+from apps.knowledge.adapters import DocumentLibrary
 from apps.playbooks.adapters import DjangoPlaybookStore
 from core.errors import PackContractError
 from core.features.registry import FeatureRegistry
@@ -29,6 +30,7 @@ from providers.llm import factory as llm_factory
 from providers.mcp.client import McpToolClient
 from providers.ocr.base import OcrEngine
 from providers.ocr.tesseract import TesseractOcr
+from providers.tracing.feedback import FeedbackSink, NoFeedbackSink
 
 
 def resolve_servers(pack: Pack) -> dict[str, str]:
@@ -53,6 +55,8 @@ class Runtime:
     identity: DjangoIdentityProvider
     conversations: DjangoConversationStore
     ocr: OcrEngine | None
+    feedback: FeedbackSink = field(default_factory=NoFeedbackSink)  # ratings, to traces too
+    library: DocumentLibrary = field(default_factory=DocumentLibrary)  # the Knowledge panel
 
     async def start(self) -> None:
         """Connect to the MCP servers, read their tools and check the pack contract.
@@ -74,6 +78,9 @@ class Runtime:
         close_model = getattr(self.orchestrator.model, "close", None)
         if close_model is not None:
             await close_model()
+        close_feedback = getattr(self.feedback, "close", None)
+        if close_feedback is not None:
+            await close_feedback()
 
 
 def build_runtime(
@@ -116,6 +123,7 @@ def build_runtime(
         trace_content=TraceContent(include=settings.JUTANT_TRACE_CONTENT),
     )
     return Runtime(
+        feedback=tracing.feedback_sink(settings),
         pack=pack,
         orchestrator=orchestrator,
         tool_client=tool_client,

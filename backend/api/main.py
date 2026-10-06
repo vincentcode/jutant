@@ -15,7 +15,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.errors import register_error_handlers
 from api.middleware import DbConnectionMiddleware, RequestIdMiddleware
 from api.queue import GenerationQueue
-from api.routers import auth, conversations, documents, features, health
+from api.routers import app as app_info
+from api.routers import auth, conversations, documents, features, health, home, library
 from config.asgi import application as django_app
 from config.container import Runtime, build_runtime
 
@@ -52,7 +53,7 @@ def create_app(runtime: Runtime | None = None) -> FastAPI:
             allow_headers=["*"],
         )
     register_error_handlers(app)
-    for module in (auth, conversations, features, documents, health):
+    for module in (app_info, auth, conversations, features, documents, health, home, library):
         app.include_router(module.router, prefix="/api")
     app.mount("/admin", django_app)
     return app

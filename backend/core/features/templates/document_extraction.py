@@ -99,8 +99,20 @@ def _call_id() -> str:
 
 
 def format_fields(schema_type: str, values: dict[str, Any]) -> str:
-    lines = [f"{schema_type.replace('_', ' ').capitalize()}:"]
+    """The fields as a table (Markdown, which the client renders), a missing one marked
+    *not found* rather than guessed."""
+    lines = [
+        f"**{schema_type.replace('_', ' ').capitalize()}**",
+        "",
+        "| Field | Value |",
+        "| --- | --- |",
+    ]
     for name, value in values.items():
-        shown = "not found" if value is None else value
-        lines.append(f"- {name.replace('_', ' ').capitalize()}: {shown}")
+        shown = "*not found*" if value in (None, "") else _cell(str(value))
+        lines.append(f"| {name.replace('_', ' ').capitalize()} | {shown} |")
     return "\n".join(lines)
+
+
+def _cell(value: str) -> str:
+    """A value safe inside a table cell: one line, no column breaks."""
+    return " ".join(value.split()).replace("|", "\\|")

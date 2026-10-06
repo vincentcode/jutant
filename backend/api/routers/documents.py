@@ -14,7 +14,7 @@ from api.routers.conversations import NOT_FOUND
 from api.schemas import UploadOut
 from config.container import Runtime
 from core.types import Caller
-from ingestion.uploads import MAX_UPLOAD_BYTES, UploadError, extract_text
+from ingestion.uploads import MAX_UPLOAD_BYTES, UploadError, read_upload
 
 router = APIRouter(prefix="/conversations", tags=["documents"])
 
@@ -33,15 +33,21 @@ async def upload(
         raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "file is too large")
     filename = file.filename or "upload"
     try:
-        text = await asyncio.to_thread(extract_text, filename, data, runtime.ocr)
+        read = await asyncio.to_thread(read_upload, filename, data, runtime.ocr)
     except UploadError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
     upload_id = await runtime.conversations.add_upload(
-        conversation_id, filename, file.content_type or "", text
+        conversation_id, filename, file.content_type or "", read.text
     )
     await runtime.orchestrator.audit.record(
         caller,
         "document_uploaded",
-        {"conversation_id": str(conversation_id), "filename": filename, "characters": len(text)},
+        {
+            "conversation_id": str(conversation_id),
+            "filename": filename,
+            "characters": len(read.text),
+        },
     )
-    return UploadOut(upload_id=upload_id, filename=filename, characters=len(text))
+    return UploadOut(
+        upload_id=upload_id, filename=filename, characters=len(read.text), note=read.note
+    )

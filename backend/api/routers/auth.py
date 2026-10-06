@@ -82,4 +82,5 @@ async def _me(runtime: Runtime, username: str, caller: Caller) -> Me:
         username=username,
         role=caller.role,
         display_name=await runtime.identity.display_name(username),
+        attributes={k: str(v) for k, v in caller.attributes.items()},
     )

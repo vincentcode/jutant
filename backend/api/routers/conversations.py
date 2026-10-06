@@ -8,12 +8,21 @@ refusal is a plain 403 rather than an event mid-stream.
 from dataclasses import asdict
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 
 from api import sse
 from api.deps import get_caller, get_runtime
-from api.schemas import AskRequest, ConversationOut, MessageOut
+from api.schemas import (
+    AskRequest,
+    ConversationOut,
+    ConversationRename,
+    FeedbackIn,
+    FeedbackOut,
+    MessageOut,
+)
+from api.sse import step_out
+from apps.conversation.adapters import Rating
 from config.container import Runtime
 from core.types import Caller
 
@@ -33,9 +42,40 @@ async def start(
 
 @router.get("")
 async def list_mine(
-    caller: Caller = Depends(get_caller), runtime: Runtime = Depends(get_runtime)
+    q: str = Query("", max_length=100, description="words in the title or the messages"),
+    caller: Caller = Depends(get_caller),
+    runtime: Runtime = Depends(get_runtime),
 ) -> list[ConversationOut]:
-    return [ConversationOut(**asdict(c)) for c in await runtime.conversations.list_for(caller.id)]
+    found = await runtime.conversations.list_for(caller.id, search=q.strip())
+    return [ConversationOut(**asdict(c)) for c in found]
+
+
+@router.patch("/{conversation_id}")
+async def rename(
+    conversation_id: UUID,
+    body: ConversationRename,
+    caller: Caller = Depends(get_caller),
+    runtime: Runtime = Depends(get_runtime),
+) -> ConversationOut:
+    renamed = await runtime.conversations.rename(conversation_id, caller.id, body.title.strip())
+    if renamed is None:
+        raise NOT_FOUND
+    return ConversationOut(**asdict(renamed))
+
+
+@router.delete("/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete(
+    conversation_id: UUID,
+    caller: Caller = Depends(get_caller),
+    runtime: Runtime = Depends(get_runtime),
+) -> None:
+    """Delete the conversation with its messages, uploads and ratings. The audit log keeps
+    what happened in it."""
+    if not await runtime.conversations.delete(conversation_id, caller.id):
+        raise NOT_FOUND
+    await runtime.orchestrator.audit.record(
+        caller, "conversation_deleted", {"conversation_id": str(conversation_id)}
+    )
 
 
 @router.get("/{conversation_id}/messages")
@@ -52,10 +92,57 @@ async def history(
             content=m.content,
             feature_id=m.feature_id,
             citations=[asdict(c) for c in m.citations],
+            steps=[step_out(s) for s in m.steps],
+            feedback=_feedback_out(m.feedback) if m.feedback else None,
             created_at=m.created_at,
         )
-        for m in await runtime.conversations.history(conversation_id)
+        for m in await runtime.conversations.history(conversation_id, caller.id)
     ]
+
+
+@router.put("/{conversation_id}/messages/{message_id}/feedback")
+async def give_feedback(
+    conversation_id: UUID,
+    message_id: UUID,
+    body: FeedbackIn,
+    background: BackgroundTasks,
+    caller: Caller = Depends(get_caller),
+    runtime: Runtime = Depends(get_runtime),
+) -> FeedbackOut:
+    """Rate an answer, or change the rating. It is stored, audited, and attached to the
+    answer's trace (after the response, so a slow tracing backend never delays staff)."""
+    await _owned(runtime, conversation_id, caller)
+    rated = await runtime.conversations.rate(
+        conversation_id, message_id, caller, body.rating, body.reason or "", body.comment
+    )
+    if rated is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "answer not found")
+    await runtime.orchestrator.audit.record(
+        caller,
+        "feedback_given",
+        {
+            "conversation_id": str(conversation_id),
+            "message_id": str(message_id),
+            "feature_id": rated.feature_id,
+            "rating": body.rating,
+            "reason": body.reason,
+            "comment": body.comment,
+        },
+    )
+    background.add_task(
+        runtime.feedback.send,
+        rated.trace_context,
+        staff_id=caller.id,
+        rating=body.rating,
+        reason=body.reason or "",
+        comment=body.comment,
+        feature_id=rated.feature_id,
+    )
+    return _feedback_out(rated.rating)
+
+
+def _feedback_out(rating: Rating) -> FeedbackOut:
+    return FeedbackOut(rating=rating.rating, reason=rating.reason or None, comment=rating.comment)
 
 
 @router.post(
@@ -85,7 +172,7 @@ async def ask(
         )
 
     return StreamingResponse(
-        sse.stream(request.app.state.queue, events),
+        sse.stream(request.app.state.queue, events, labels=runtime.pack.manifest.tool_labels),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

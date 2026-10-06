@@ -55,6 +55,7 @@ def load_pack(path: str | Path) -> Pack:
             roles=tuple(f.roles),
             route_patterns=tuple(f.route.patterns),
             route_examples=tuple(f.route.examples),
+            suggestions=tuple(f.suggestions),
             prefetch=tuple(
                 Prefetch(
                     p.tool,

@@ -9,12 +9,13 @@ drop silent connections. If the client goes away, the generation is cancelled an
 import asyncio
 import json
 import logging
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import suppress
 from dataclasses import asdict
 from typing import Any
 
 from api.queue import GenerationQueue
+from api.schemas import StepOut
 from core.errors import PolicyDenied
 from core.events import (
     Completed,
@@ -37,12 +38,14 @@ def frame(name: str, data: Any) -> str:
     return f"event: {name}\ndata: {json.dumps(data, default=str)}\n\n"
 
 
-def to_frame(event: Event) -> str:
+def to_frame(event: Event, labels: Mapping[str, str] | None = None) -> str:
+    """`labels`: what each tool looks at, in staff's words, sent with each tool call."""
     match event:
         case FeatureSelected(feature_id):
             return frame("feature_selected", {"feature_id": feature_id})
         case ToolStarted(call):
-            return frame("tool_started", {"call": asdict(call)})
+            label = (labels or {}).get(call.name)
+            return frame("tool_started", {"call": asdict(call), "label": label})
         case ToolFinished(result):
             # The data itself stays on the server; the client shows that a tool ran and its sources.
             return frame(
@@ -58,11 +61,17 @@ def to_frame(event: Event) -> str:
             )
         case TextDelta(text):
             return frame("text_delta", {"text": text})
-        case PlaybookStepShown(playbook_id, step):
-            fields = ("order", "title", "instruction", "expects", "choices")
+        case PlaybookStepShown():
+            shown = step_out(event)
+            step = shown.model_dump(include={"order", "title", "instruction", "expects", "choices"})
             return frame(
                 "playbook_step",
-                {"playbook_id": playbook_id, "step": {f: getattr(step, f) for f in fields}},
+                {
+                    "playbook_id": shown.playbook_id,
+                    "playbook_title": shown.playbook_title,
+                    "answered": shown.answered,
+                    "step": step,
+                },
             )
         case Completed(answer):
             return frame(
@@ -80,10 +89,24 @@ def to_frame(event: Event) -> str:
     raise TypeError(f"unknown event {event!r}")
 
 
+def step_out(shown: PlaybookStepShown) -> StepOut:
+    return StepOut(
+        playbook_id=shown.playbook_id,
+        playbook_title=shown.playbook_title,
+        order=shown.step.order,
+        title=shown.step.title,
+        instruction=shown.step.instruction,
+        expects=shown.step.expects,
+        choices=list(shown.step.choices),
+        answered=shown.answered,
+    )
+
+
 async def stream(
     queue: GenerationQueue,
     make_events: Callable[[], AsyncIterator[Event]],
     keepalive_s: float = KEEPALIVE_S,
+    labels: Mapping[str, str] | None = None,
 ) -> AsyncIterator[str]:
     async def frames() -> AsyncIterator[str]:
         if queue.busy:
@@ -91,7 +114,7 @@ async def stream(
         async with queue.slot():
             try:
                 async for event in make_events():
-                    yield to_frame(event)
+                    yield to_frame(event, labels)
             except PolicyDenied:
                 yield frame("failed", {"reason": "denied"})
             except Exception:

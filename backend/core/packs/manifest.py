@@ -55,6 +55,9 @@ class FeatureDef(BaseModel):
     roles: list[str] = []  # empty = all roles
     route: RouteDef = RouteDef()
     prefetch: list[PrefetchDef] = []
+    # Questions the client offers on its first screen. Unlike route examples, these are asked
+    # for real, so they must be ones the deployment can answer.
+    suggestions: list[str] = []
 
 
 class Classification(BaseModel):
@@ -73,6 +76,28 @@ class ExtractionSchema(BaseModel):
     fields: list[str]
 
 
+class HomeCard(BaseModel):
+    """A starting point on the client's home screen: it starts the feature it names."""
+
+    title: str  # "Investigate a transaction"
+    description: str  # "Search payments, transfers and transaction errors."
+    feature: str
+    icon: str = ""  # a Lucide icon name, e.g. "landmark"; the client has a default
+    label: str = ""  # a short tag under it, e.g. "Payments"
+
+
+class QuickAction(BaseModel):
+    """A chip in the client's question box that picks a feature."""
+
+    label: str  # "Transaction"
+    feature: str
+
+
+class HomeDef(BaseModel):
+    cards: list[HomeCard] = []
+    quick_actions: list[QuickAction] = []
+
+
 class PackManifest(BaseModel):
     name: str
     display_name: str
@@ -85,4 +110,8 @@ class PackManifest(BaseModel):
     classifications: list[Classification]
     field_rules: list[FieldRuleDef] = []
     extraction_schemas: list[ExtractionSchema] = []
+    # What each tool looks at, in staff's words, for the client's activity line:
+    # "Checking the account's transactions…", "Not allowed: the account's transactions".
+    tool_labels: dict[str, str] = {}
+    home: HomeDef = HomeDef()  # the client's home screen
     policy: str  # dotted path to a module exposing RULES

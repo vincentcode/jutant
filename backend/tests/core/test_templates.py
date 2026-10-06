@@ -53,8 +53,8 @@ async def test_extraction_uses_the_schema_the_question_names() -> None:
         )
     )
 
-    assert "- Full name: Ama Mensah" in answer.text
-    assert "- Expiry date: not found" in answer.text
+    assert "| Full name | Ama Mensah |" in answer.text
+    assert "| Expiry date | *not found* |" in answer.text
     assert "extra" not in answer.text
     assert "full_name, id_number, expiry_date" in rig.model.calls[0].messages[0].content
 
@@ -75,7 +75,7 @@ async def test_extraction_asks_the_model_for_the_document_type_when_unnamed() ->
         )
     )
 
-    assert "- Employer: Acme" in answer.text
+    assert "| Employer | Acme |" in answer.text
 
 
 async def test_upload_without_a_field_request_is_summarised() -> None:
@@ -262,3 +262,11 @@ def test_long_text_is_split_with_overlap() -> None:
 def test_numbered_list_items_are_not_headings() -> None:
     chunks = split("1. Bring your ID.\n2. Sign the form.")
     assert chunks[0].section == ""
+
+
+def test_extracted_values_cannot_break_the_table() -> None:
+    from core.features.templates.document_extraction import format_fields
+
+    table = format_fields("payslip", {"employer": "Acme | Sons\nLtd", "net_pay": None})
+    assert r"| Employer | Acme \| Sons Ltd |" in table
+    assert "| Net pay | *not found* |" in table

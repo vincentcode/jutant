@@ -108,6 +108,12 @@ JUTANT_TRACING_API_KEY = env("JUTANT_TRACING_API_KEY", "")
 JUTANT_TRACING_SERVICE_NAME = env("JUTANT_TRACING_SERVICE_NAME", "jutant-api")
 JUTANT_TRACING_PROJECT = env("JUTANT_TRACING_PROJECT", "jutant")
 JUTANT_TRACE_CONTENT = env("JUTANT_TRACE_CONTENT", "false").lower() in ("1", "true", "yes")
+# Staff feedback on answers is also attached to the answer's trace: "phoenix" or "none".
+JUTANT_TRACING_FEEDBACK = env("JUTANT_TRACING_FEEDBACK", "phoenix")
+
+# The web client's accent colour for this deployment (the bank's), as #rrggbb; empty keeps the
+# default blue. The assistant's name comes from the pack (display_name).
+JUTANT_THEME_ACCENT = env("JUTANT_THEME_ACCENT", "")
 # Proxies whose X-Forwarded-For is believed (comma-separated addresses or networks), such as
 # the web container's nginx. Empty: the connecting address is the client's.
 JUTANT_TRUSTED_PROXIES = [
