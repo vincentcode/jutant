@@ -9,8 +9,8 @@ from uuid import UUID
 
 from django.db import transaction
 
-from apps.audit.masking import mask
 from apps.audit.models import AuditEvent
+from core.privacy.masking import mask
 
 
 @transaction.atomic

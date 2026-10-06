@@ -99,6 +99,15 @@ JUTANT_LOGIN_WINDOW_MIN = int(env("JUTANT_LOGIN_WINDOW_MIN", "15"))
 # How long data kept only for a while is kept (manage.py purge_expired deletes it).
 JUTANT_UPLOAD_RETENTION_DAYS = int(env("JUTANT_UPLOAD_RETENTION_DAYS", "30"))
 JUTANT_LOGIN_ATTEMPT_RETENTION_DAYS = int(env("JUTANT_LOGIN_ATTEMPT_RETENTION_DAYS", "7"))
+
+# Tracing (OpenTelemetry, e.g. to Phoenix): off unless the endpoint is set. Tool arguments are
+# always traced, masked as in the audit log. Prompts, replies, questions, answers and tool
+# results are traced only with JUTANT_TRACE_CONTENT=true, and masked too.
+JUTANT_TRACING_ENDPOINT = env("JUTANT_TRACING_ENDPOINT", "")  # http://phoenix:6006/v1/traces
+JUTANT_TRACING_API_KEY = env("JUTANT_TRACING_API_KEY", "")
+JUTANT_TRACING_SERVICE_NAME = env("JUTANT_TRACING_SERVICE_NAME", "jutant-api")
+JUTANT_TRACING_PROJECT = env("JUTANT_TRACING_PROJECT", "jutant")
+JUTANT_TRACE_CONTENT = env("JUTANT_TRACE_CONTENT", "false").lower() in ("1", "true", "yes")
 # Proxies whose X-Forwarded-For is believed (comma-separated addresses or networks), such as
 # the web container's nginx. Empty: the connecting address is the client's.
 JUTANT_TRUSTED_PROXIES = [

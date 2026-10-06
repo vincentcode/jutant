@@ -62,6 +62,8 @@ class ToolResult:
 class ModelReply:
     text: str | None
     tool_calls: tuple[ToolCall, ...] = ()
+    prompt_tokens: int | None = None  # as the model reports them, for tracing
+    completion_tokens: int | None = None
 
 
 @dataclass(frozen=True)

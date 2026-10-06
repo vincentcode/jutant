@@ -61,7 +61,9 @@ class FeatureRouter:
         self._patterns = {f.id: [re.compile(p) for p in f.route_patterns] for f in registry}
         self._examples: dict[str, list[list[float]]] | None = None  # embedded on first use
 
-    async def route(self, caller: Caller, text: str) -> Route:
+    async def route(self, caller: Caller, text: str, model: ModelProvider | None = None) -> Route:
+        """`model` stands in for the router's own for this question (a traced one, say)."""
+        model = model or self.model
         available = self.registry.for_role(caller.role)
         if not available:
             raise LookupError(f"No features for role {caller.role}")
@@ -69,11 +71,11 @@ class FeatureRouter:
             return Route(available[0], "only")
         if (feature := self._by_pattern(text, available)) is not None:
             return Route(feature, "pattern")
-        if (route := await self._by_meaning(text, available)) is not None:
+        if (route := await self._by_meaning(text, available, model)) is not None:
             return route
         options = [Option(f.id, f.description) for f in available]
         by_id = {f.id: f for f in available}
-        if chosen := await ask_model(self.model, INSTRUCTION, text, options):
+        if chosen := await ask_model(model, INSTRUCTION, text, options):
             return Route(by_id[chosen], "model")
         if chosen := best_keyword_match(text, options):
             return Route(by_id[chosen], "keywords")
@@ -83,10 +85,14 @@ class FeatureRouter:
         matched = [f for f in available if any(p.search(text) for p in self._patterns[f.id])]
         return matched[0] if len(matched) == 1 else None
 
-    async def _by_meaning(self, text: str, available: Sequence[Feature]) -> Route | None:
+    async def _by_meaning(
+        self, text: str, available: Sequence[Feature], model: ModelProvider
+    ) -> Route | None:
         try:
             examples = await self._embedded_examples()
-            [question] = await self.model.embed([self.embed_prefix + text])
+            if not any(examples.get(f.id) for f in available):
+                return None  # nothing to compare with: do not embed the question
+            [question] = await model.embed([self.embed_prefix + text])
         except ModelUnavailable:
             return None
         scored = sorted(

@@ -13,6 +13,7 @@ A call that comes back as `server__tool` is still mapped to its tool.
 import json
 import re
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from typing import Any
 from uuid import uuid4
 
@@ -61,7 +62,8 @@ class OllamaProvider:
     async def chat(self, messages: list[Message], tools: list[ToolSpec]) -> ModelReply:
         data = await self._post("/api/chat", self._chat_body(messages, tools, stream=False))
         message = data.get("message") or {}
-        return _reply(message.get("content") or "", message.get("tool_calls") or [], tools)
+        reply = _reply(message.get("content") or "", message.get("tool_calls") or [], tools)
+        return _with_usage(reply, data)
 
     async def stream_chat(
         self, messages: list[Message], tools: list[ToolSpec]
@@ -70,6 +72,7 @@ class OllamaProvider:
         as text (it starts with `{` or `<tool_call>`): that is held until it is clearly not."""
         body = self._chat_body(messages, tools, stream=True)
         content, sent, wire_calls = "", 0, []
+        last: dict[str, Any] = {}
         holding = bool(tools)
         try:
             async with self._http.stream("POST", "/api/chat", json=body) as response:
@@ -89,10 +92,11 @@ class OllamaProvider:
                             yield content[sent:]
                             sent = len(content)
                     if chunk.get("done"):
+                        last = chunk  # carries the token counts
                         break
         except httpx.HTTPError as exc:
             raise ModelUnavailable(f"Ollama stream failed: {exc}") from exc
-        yield _reply(content, wire_calls, tools)
+        yield _with_usage(_reply(content, wire_calls, tools), last)
 
     def _chat_body(
         self, messages: list[Message], tools: list[ToolSpec], *, stream: bool
@@ -151,6 +155,15 @@ def _reply(content: str, wire_calls: list[dict[str, Any]], tools: list[ToolSpec]
     if calls:
         return ModelReply(text=None, tool_calls=calls)
     return ModelReply(text=content)
+
+
+def _with_usage(reply: ModelReply, data: dict[str, Any]) -> ModelReply:
+    """The reply with Ollama's token counts, when it gives them."""
+    return replace(
+        reply,
+        prompt_tokens=data.get("prompt_eval_count"),
+        completion_tokens=data.get("eval_count"),
+    )
 
 
 def _may_be_text_call(content: str) -> bool:

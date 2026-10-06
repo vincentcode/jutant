@@ -1,4 +1,4 @@
-"""Masks personal data in audit detail before it is written.
+"""Masks personal data before it is written anywhere: the audit log, traces.
 
 Emails, phone numbers and long digit runs (account, card and ID numbers) are masked wherever
 they appear in string values, at any depth. The last four digits of a number are kept, so staff

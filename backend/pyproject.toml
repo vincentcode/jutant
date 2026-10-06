@@ -20,6 +20,8 @@ dependencies = [
     "pypdf>=4.3",
     "python-docx>=1.1",
     "pytesseract>=0.3",
+    "opentelemetry-sdk>=1.45",
+    "opentelemetry-exporter-otlp-proto-http>=1.45",
 ]
 
 [project.optional-dependencies]
@@ -74,7 +76,9 @@ include_external_packages = true
 name = "Core is independent"
 type = "forbidden"
 source_modules = ["core"]
-forbidden_modules = ["django", "fastapi", "api", "apps", "providers", "mcp_servers", "ingestion", "packs", "config"]
+# No tracing library either: the core traces through its Tracer port only.
+forbidden_modules = ["django", "fastapi", "api", "apps", "providers", "mcp_servers", "ingestion", "packs", "config",
+                     "opentelemetry"]
 
 [[tool.importlinter.contracts]]
 name = "Packs depend only on core"

@@ -14,3 +14,4 @@ web/.env
 web/tsconfig.tsbuildinfo
 web/openapi.json
 backend/evals-*.json
+infra/phoenix.env

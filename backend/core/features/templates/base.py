@@ -13,6 +13,7 @@ from uuid import UUID
 from core.errors import InvalidToolCall, ModelUnavailable, UnknownTool
 from core.events import Event, Failed, TextDelta, ToolFinished, ToolStarted
 from core.features.prefetch import planned_calls
+from core.observability import Trace
 from core.ports import AuditSink, ModelProvider, PlaybookStore
 from core.types import Caller, Feature, Message, ModelReply, ToolCall, ToolResult, ToolSpec
 
@@ -43,6 +44,7 @@ class FeatureContext:
     upload_text: str | None = None  # text of a file uploaded for extraction, already OCR'd
     extraction_schemas: dict[str, list[str]] = field(default_factory=dict)
     results: list[ToolResult] = field(default_factory=list)  # filled by the tool loop
+    trace: Trace = field(default_factory=Trace)  # the turn's span, for tool call spans
 
 
 class FeatureTemplate(Protocol):
@@ -129,11 +131,20 @@ async def tool_loop(ctx: FeatureContext) -> AsyncIterator[Event]:
 async def run_call(ctx: FeatureContext, call: ToolCall) -> AsyncIterator[Event]:
     """Make one call through the gateway; its result is added to `ctx.results`."""
     yield ToolStarted(call)
-    try:
-        result = await ctx.gateway.execute(ctx.caller, ctx.feature, call, str(ctx.conversation_id))
-    except (InvalidToolCall, UnknownTool) as exc:
-        result = ToolResult(
-            call.id, ok=False, data={"problems": [str(exc)]}, error="invalid_arguments"
+    attributes = {"tool.name": call.name, "tool.arguments": ctx.trace.masked(call.arguments)}
+    with ctx.trace.span(call.name, "tool", **attributes) as span:
+        try:
+            result = await ctx.gateway.execute(
+                ctx.caller, ctx.feature, call, str(ctx.conversation_id)
+            )
+        except (InvalidToolCall, UnknownTool) as exc:
+            result = ToolResult(
+                call.id, ok=False, data={"problems": [str(exc)]}, error="invalid_arguments"
+            )
+        span.set(
+            **{"tool.ok": result.ok, "tool.error": result.error},
+            output=span.text(result.data),
+            citations=len(result.citations),
         )
     ctx.results.append(result)
     yield ToolFinished(result)

@@ -105,6 +105,23 @@ services:
       timeout: 3s
       retries: 20
 
+  # Traces of every turn (Phoenix), at http://localhost:6006. Optional: start with
+  #   docker compose -f infra/docker-compose.yml --profile observability up -d
+  # and set JUTANT_TRACING_ENDPOINT and JUTANT_TRACING_API_KEY in backend/.env. Its own settings
+  # (secrets, admin password) are in infra/phoenix.env, so it never sees the platform's secrets.
+  phoenix:
+    image: arizephoenix/phoenix:version-20.19.0-nonroot
+    profiles: [observability]
+    env_file: [{path: phoenix.env, required: false}]
+    environment:
+      PHOENIX_WORKING_DIR: /phoenix
+      PHOENIX_ENABLE_AUTH: "true"  # traces hold conversations: sign-in required
+      PHOENIX_TELEMETRY_ENABLED: "false"
+      PHOENIX_DEFAULT_RETENTION_POLICY_DAYS: "14"
+    volumes: [phoenix:/phoenix]
+    ports: ["6006:6006"]
+    restart: unless-stopped
+
   # Deletes uploads and sign-in attempts past their retention periods, every six hours.
   housekeeping:
     <<: *python
@@ -130,5 +147,6 @@ services:
       api: {condition: service_healthy}
 
 volumes:
+  phoenix:
   pgdata:
   ollama:

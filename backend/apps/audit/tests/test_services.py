@@ -3,7 +3,7 @@ from uuid import uuid4
 import pytest
 
 from apps.audit import selectors, services
-from apps.audit.masking import mask
+from core.privacy.masking import mask
 
 pytestmark = pytest.mark.django_db
 

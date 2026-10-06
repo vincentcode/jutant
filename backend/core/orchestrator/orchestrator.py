@@ -11,6 +11,9 @@
    back until this check is done, rather than streamed as they arrive.
 6. Store the answer, audit it with where the time went (routing, model, tools), and finish
    with Completed (or Failed).
+
+The turn is traced through the `Tracer` port, if one is given: a span for the turn, routing,
+each model and tool call, and each playbook step shown.
 """
 
 import time
@@ -31,6 +34,7 @@ from core.events import (
 from core.features.registry import FeatureRegistry
 from core.features.router import FeatureRouter
 from core.features.templates import TEMPLATES, FeatureContext, FeatureTemplate
+from core.observability import NOOP, Trace, TraceContent, TracedModel, Tracer
 from core.orchestrator.citations import collect
 from core.orchestrator.context import build_messages
 from core.orchestrator.timing import TimedModel, TurnTimer
@@ -62,6 +66,8 @@ class Orchestrator:
         system_prompt: str = "",
         extraction_schemas: Mapping[str, list[str]] | None = None,
         templates: Mapping[str, FeatureTemplate] = TEMPLATES,
+        tracer: Tracer = NOOP,
+        trace_content: TraceContent | None = None,
     ):
         self.model = model
         self.tools = tools
@@ -76,6 +82,8 @@ class Orchestrator:
         self.system_prompt = system_prompt
         self.extraction_schemas = dict(extraction_schemas or {})
         self.templates = templates
+        self.tracer = tracer
+        self.trace_content = trace_content or TraceContent()
         self.runner = PlaybookRunner(playbooks, audit, model)
 
     async def load_tools(self) -> None:
@@ -93,7 +101,32 @@ class Orchestrator:
         """Answer one question, streaming events.
 
         Raises PolicyDenied before the first event if the caller may not use the feature.
+        The whole turn is one trace: routing, model and tool calls, playbook steps.
         """
+        root = Trace(self.tracer, self.trace_content)
+        with root.span(
+            "turn",
+            "agent",
+            session=str(conversation_id),
+            user=caller.id,
+            role=caller.role,
+            input=root.text(text),
+            feature=feature_id,
+        ) as turn:
+            async for event in self._ask(
+                caller, conversation_id, text, feature_id, upload_text, turn
+            ):
+                yield event
+
+    async def _ask(
+        self,
+        caller: Caller,
+        conversation_id: UUID,
+        text: str,
+        feature_id: str | None,
+        upload_text: str | None,
+        turn: Trace,
+    ) -> AsyncIterator[Event]:
         timer = TurnTimer()
         await self.audit.record(
             caller,
@@ -107,13 +140,14 @@ class Orchestrator:
         if run is not None:
             await self.conversations.append(conversation_id, Message("user", text))
             events = self.runner.advance(caller, conversation_id, text)
+            turn.set(feature=run.feature_id, playbook=run.playbook_id)
             async for event in self._finish(
-                caller, conversation_id, run.feature_id, events, timer=timer
+                caller, conversation_id, run.feature_id, events, timer=timer, trace=turn
             ):
                 yield event
             return
 
-        feature = await self._resolve(caller, conversation_id, text, feature_id)
+        feature = await self._resolve(caller, conversation_id, text, feature_id, turn)
         timer.route_s = time.perf_counter() - timer.started
         history = await self.conversations.recent_messages(conversation_id, self.history_limit)
         await self.conversations.append(conversation_id, Message("user", text))
@@ -126,7 +160,7 @@ class Orchestrator:
             feature=feature,
             question=text,
             messages=build_messages(self.system_prompt, feature, history, text),
-            model=TimedModel(self.model, timer),
+            model=TimedModel(TracedModel(self.model, turn), timer),
             gateway=self.gateway,
             playbooks=self.playbooks,
             runner=self.runner,
@@ -134,6 +168,7 @@ class Orchestrator:
             max_steps=self.max_steps,
             upload_text=upload_text,
             extraction_schemas=self.extraction_schemas,
+            trace=turn,
         )
         events = template.run(ctx)
         async for event in self._finish(
@@ -144,12 +179,19 @@ class Orchestrator:
             template.requires_citation,
             ctx.results,
             timer,
+            turn,
         ):
             yield event
 
     async def _resolve(
-        self, caller: Caller, conversation_id: UUID, text: str, feature_id: str | None
+        self,
+        caller: Caller,
+        conversation_id: UUID,
+        text: str,
+        feature_id: str | None,
+        turn: Trace | None = None,
     ) -> Feature:
+        turn = turn or Trace()
         detail: dict[str, object] = {"conversation_id": str(conversation_id)}
         if feature_id:
             try:
@@ -158,10 +200,12 @@ class Orchestrator:
                 raise PolicyDenied(f"unknown feature {feature_id}") from None
             detail["chosen_by"] = "client"
         else:
-            try:
-                route = await self.router.route(caller, text)
-            except LookupError:
-                raise PolicyDenied(f"no features for role {caller.role}") from None
+            with turn.span("route", "chain") as routing:
+                try:
+                    route = await self.router.route(caller, text, TracedModel(self.model, routing))
+                except LookupError:
+                    raise PolicyDenied(f"no features for role {caller.role}") from None
+                routing.set(feature=route.feature.id, routed_by=route.by, score=route.score)
             feature = route.feature
             detail["chosen_by"] = route.by  # pattern, meaning, model... to find misroutes
             if route.score is not None:
@@ -169,6 +213,7 @@ class Orchestrator:
         if not feature.allows(caller.role):
             raise PolicyDenied(f"role {caller.role} may not use {feature.id}")
         await self.audit.record(caller, "feature_routed", {**detail, "feature_id": feature.id})
+        turn.set(feature=feature.id, routed_by=detail["chosen_by"])
         return feature
 
     async def _finish(
@@ -180,6 +225,7 @@ class Orchestrator:
         requires_citation: bool = False,
         results: list[ToolResult] | None = None,
         timer: TurnTimer | None = None,
+        trace: Trace | None = None,
     ) -> AsyncIterator[Event]:
         """Pass the template's events on, then check citations, store and audit the answer.
 
@@ -188,6 +234,7 @@ class Orchestrator:
         turn has them can never be replaced.
         """
         timer = timer or TurnTimer()
+        trace = trace or Trace()
         tool_started = 0.0
         text = ""  # the answer so far, with paragraph breaks
         sent = 0  # how much of it has been passed on
@@ -196,6 +243,8 @@ class Orchestrator:
         try:
             async for event in events:
                 if isinstance(event, Failed):
+                    trace.fail(event.reason)
+                    trace.set(failed=event.reason, **_timing(timer))
                     await self._audit_answer(
                         caller, conversation_id, feature_id, timer, failed=event.reason
                     )
@@ -216,11 +265,22 @@ class Orchestrator:
                 elif isinstance(event, ToolFinished):
                     timer.tool_s += time.perf_counter() - tool_started
                 elif isinstance(event, PlaybookStepShown):
+                    with trace.span(
+                        "playbook step",
+                        "chain",
+                        playbook=event.playbook_id,
+                        step=event.step.order,
+                        title=event.step.title,
+                        expects=event.step.expects,
+                    ):
+                        pass
                     steps.append(
                         f"Step {event.step.order}: {event.step.title}. {event.step.instruction}"
                     )
                 yield event
         except ModelUnavailable:
+            trace.fail(MODEL_UNAVAILABLE)
+            trace.set(failed=MODEL_UNAVAILABLE, **_timing(timer))
             await self._audit_answer(
                 caller, conversation_id, feature_id, timer, failed=MODEL_UNAVAILABLE
             )
@@ -246,6 +306,7 @@ class Orchestrator:
             citations=len(citations),
             tools=[c.name for c in calls],
         )
+        trace.set(output=trace.text(text), citations=len(citations), **_timing(timer))
         yield Completed(Answer(text, feature_id, citations, tuple(calls)))
 
     async def _audit_answer(
@@ -266,3 +327,7 @@ class Orchestrator:
                 "timing": timer.as_detail(),  # where the turn's time went
             },
         )
+
+
+def _timing(timer: TurnTimer) -> dict[str, int]:
+    return {f"timing.{name}": value for name, value in timer.as_detail().items()}

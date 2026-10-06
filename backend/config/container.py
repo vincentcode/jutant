@@ -17,12 +17,14 @@ from apps.playbooks.adapters import DjangoPlaybookStore
 from core.errors import PackContractError
 from core.features.registry import FeatureRegistry
 from core.features.router import FeatureRouter
+from core.observability import TraceContent
 from core.orchestrator.orchestrator import Orchestrator
 from core.packs.contract import check
 from core.packs.loader import Pack, load_pack
 from core.ports import ModelProvider
 from core.tools.catalog import ToolCatalog
 from core.tools.gateway import ToolGateway
+from providers import tracing
 from providers.llm import factory as llm_factory
 from providers.mcp.client import McpToolClient
 from providers.ocr.base import OcrEngine
@@ -66,6 +68,9 @@ class Runtime:
 
     async def stop(self) -> None:
         await self.tool_client.close()
+        shutdown_tracing = getattr(self.orchestrator.tracer, "shutdown", None)
+        if shutdown_tracing is not None:
+            shutdown_tracing()  # sends the spans still waiting
         close_model = getattr(self.orchestrator.model, "close", None)
         if close_model is not None:
             await close_model()
@@ -107,6 +112,8 @@ def build_runtime(
         history_limit=settings.JUTANT_HISTORY_LIMIT,
         system_prompt=pack.system_prompt,
         extraction_schemas=pack.extraction_schemas,
+        tracer=tracing.build(settings),
+        trace_content=TraceContent(include=settings.JUTANT_TRACE_CONTENT),
     )
     return Runtime(
         pack=pack,
