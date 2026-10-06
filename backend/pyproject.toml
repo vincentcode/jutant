@@ -85,7 +85,12 @@ name = "Packs depend only on core"
 type = "forbidden"
 source_modules = ["packs"]
 # A pack's tests call its tools through the platform's MCP client, exactly as the platform does.
-ignore_imports = ["packs.*.tests.** -> providers.mcp.client"]
+# Pack servers run through the platform's `serve`, which sets up the platform's tracing; pack
+# code itself still cannot import providers.
+ignore_imports = [
+    "packs.*.tests.** -> providers.mcp.client",
+    "mcp_servers.common.server -> providers.tracing",
+]
 forbidden_modules = ["api", "apps", "providers", "config", "ingestion"]
 
 [[tool.importlinter.contracts]]

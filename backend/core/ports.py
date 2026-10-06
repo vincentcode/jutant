@@ -1,6 +1,6 @@
 """Protocols the core depends on. Django apps and providers implement them."""
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from datetime import datetime
 from typing import Any, Protocol
 from uuid import UUID
@@ -47,7 +47,11 @@ class ModelProvider(Protocol):
 
 class ToolClient(Protocol):
     async def list_tools(self) -> list[ToolSpec]: ...
-    async def call(self, caller: Caller, call: ToolCall) -> ToolResult: ...
+    async def call(
+        self, caller: Caller, call: ToolCall, trace_context: Mapping[str, str] | None = None
+    ) -> ToolResult:
+        """`trace_context` (a tracing carrier) lets the server join the caller's trace."""
+        ...
 
 
 class ConversationStore(Protocol):

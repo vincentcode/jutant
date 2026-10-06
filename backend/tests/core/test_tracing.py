@@ -33,6 +33,9 @@ class Recorded:
     def fail(self, reason: str) -> None:
         self.failed = reason
 
+    def carrier(self) -> dict[str, str]:
+        return {"traceparent": f"span:{id(self)}"}
+
 
 class RecordingTracer:
     def __init__(self) -> None:
@@ -45,6 +48,9 @@ class RecordingTracer:
             parent.children.append(span)
         self.spans.append(span)
         yield span
+
+    def remote(self, carrier):
+        return Recorded("remote parent", "tool", dict(carrier), None)
 
     def named(self, name: str) -> list[Recorded]:
         return [s for s in self.spans if s.name == name]
@@ -160,3 +166,13 @@ async def test_the_model_s_tool_calls_are_recorded_masked() -> None:
     assert first.attributes["reply.tool_calls"] == [
         {"name": "documents.search", "arguments": {"query": "account ******3344"}}
     ]
+
+
+async def test_a_tool_call_hands_its_span_to_the_server() -> None:
+    model = FakeModel(replies=[ModelReply("Both need ID.")])
+    rig, tracer = await traced_rig(
+        model, results={"documents.search": doc_result("KYC Policy", "4.2")}, features=searched()
+    )
+    await collect_events(rig.orchestrator.ask(teller(), uuid4(), "KYC?", "policy_qa"))
+    [tool_span] = tracer.named("documents.search")
+    assert rig.tools.calls[0].trace_context == {"traceparent": f"span:{id(tool_span)}"}

@@ -3,7 +3,8 @@
 Holds one session per configured server, opened at start-up. Tool names are prefixed with the
 server name (`documents.search`). On every call the caller is signed with a short-lived token
 and sent in the request's `_meta`, never as a tool argument; the server verifies it before
-running the tool. Results come back in the shared envelope (`core.tools.envelope`).
+running the tool. The caller's trace travels in `_meta` too, so the server's spans join it.
+Results come back in the shared envelope (`core.tools.envelope`).
 
 A server is given as a URL (streamable HTTP, as deployed) or as an in-process server object,
 which tests and the pack contract check use to run the real tools without a network.
@@ -16,6 +17,7 @@ the failure would tear down every session and the task that opened them.
 
 import asyncio
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 from mcp import Client
@@ -173,17 +175,21 @@ class McpToolClient:
                     break
         return specs
 
-    async def call(self, caller: Caller, call: ToolCall) -> ToolResult:
+    async def call(
+        self, caller: Caller, call: ToolCall, trace_context: Mapping[str, str] | None = None
+    ) -> ToolResult:
         server, _, tool = call.name.partition(".")
         session = self._sessions.get(server)
         if session is None or not tool:
             return ToolResult(call.id, ok=False, error="not_found")
-        token = sign_caller(caller, self.secret, self.token_ttl_s)
+        meta: dict[str, Any] = {
+            envelope.CALLER_META_KEY: sign_caller(caller, self.secret, self.token_ttl_s)
+        }
+        if trace_context:
+            meta[envelope.TRACE_META_KEY] = dict(trace_context)  # the server joins the trace
         try:
             client = await session.get()
-            result = await client.call_tool(
-                tool, call.arguments, meta={envelope.CALLER_META_KEY: token}
-            )
+            result = await client.call_tool(tool, call.arguments, meta=meta)
         except Exception as exc:
             # Not retried here: a tool might not be safe to run twice. The next call reconnects.
             logger.warning("MCP call %s failed: %s", call.name, _cause(exc))

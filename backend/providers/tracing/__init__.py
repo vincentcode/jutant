@@ -1,19 +1,38 @@
 """Tracing backends for the core's Tracer port."""
 
+import os
+from collections.abc import Mapping
 from typing import Any
 
-from core.observability import NOOP, Tracer
+from core.observability import NOOP, TraceContent, Tracer
 
 
 def build(settings: Any) -> Tracer:
     """OpenTelemetry to JUTANT_TRACING_ENDPOINT if it is set; otherwise nothing is traced."""
-    if not settings.JUTANT_TRACING_ENDPOINT:
+    return _tracer(
+        settings.JUTANT_TRACING_ENDPOINT,
+        settings.JUTANT_TRACING_API_KEY,
+        settings.JUTANT_TRACING_SERVICE_NAME,
+        settings.JUTANT_TRACING_PROJECT,
+    )
+
+
+def from_env(service_name: str, env: Mapping[str, str] = os.environ) -> tuple[Tracer, TraceContent]:
+    """The tracer and content rule for a process without Django settings (an MCP server),
+    from the same JUTANT_TRACING_* and JUTANT_TRACE_CONTENT variables the API reads."""
+    tracer = _tracer(
+        env.get("JUTANT_TRACING_ENDPOINT", ""),
+        env.get("JUTANT_TRACING_API_KEY", ""),
+        service_name,
+        env.get("JUTANT_TRACING_PROJECT", "jutant"),
+    )
+    content = env.get("JUTANT_TRACE_CONTENT", "false").lower() in ("1", "true", "yes")
+    return tracer, TraceContent(include=content)
+
+
+def _tracer(endpoint: str, api_key: str, service_name: str, project: str) -> Tracer:
+    if not endpoint:
         return NOOP
     from providers.tracing.otel import OtelTracer
 
-    return OtelTracer(
-        settings.JUTANT_TRACING_ENDPOINT,
-        api_key=settings.JUTANT_TRACING_API_KEY,
-        service_name=settings.JUTANT_TRACING_SERVICE_NAME,
-        project=settings.JUTANT_TRACING_PROJECT,
-    )
+    return OtelTracer(endpoint, api_key=api_key, service_name=service_name, project=project)

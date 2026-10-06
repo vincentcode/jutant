@@ -19,11 +19,13 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter
 from opentelemetry.trace import Status, StatusCode
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 from core.observability import SpanKind
 
 logger = logging.getLogger(__name__)
 
+PROPAGATOR = TraceContextTextMapPropagator()  # W3C traceparent, understood by any OTel tool
 STOPPED = (GeneratorExit,)  # the client went away: the turn ended early, it did not fail
 
 
@@ -36,6 +38,11 @@ class _Span:
 
     def fail(self, reason: str) -> None:
         self.otel.set_status(Status(StatusCode.ERROR, reason))
+
+    def carrier(self) -> dict[str, str]:
+        carrier: dict[str, str] = {}
+        PROPAGATOR.inject(carrier, context=trace.set_span_in_context(self.otel))
+        return carrier
 
 
 class OtelTracer:
@@ -90,6 +97,11 @@ class OtelTracer:
             raise
         finally:
             span.end()
+
+    def remote(self, carrier: Mapping[str, str]) -> _Span | None:
+        """The span another process passed on, as a parent for spans here."""
+        span = trace.get_current_span(PROPAGATOR.extract(dict(carrier)))
+        return _Span(span) if span.get_span_context().is_valid else None
 
     def shutdown(self) -> None:
         """Send any spans still waiting, then stop."""

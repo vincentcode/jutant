@@ -12,6 +12,11 @@ runs, and only returns data, if the access rules allow it. Each tool registered 
 5. has hidden fields removed from its data;
 6. returns the shared envelope with the data and citations.
 
+With a tracer set, each call is a span that joins the platform's trace (from the call's
+`_meta`): who called, every policy decision, and the tool's own run (its calls to the client's
+systems) as a child span. Arguments are masked as in the audit log; the returned data is traced
+only with content tracing on.
+
 A tool function takes the verified `caller` as its first parameter, followed by the arguments
 the model supplies. The caller parameter is left out of the schema the model sees.
 """
@@ -25,7 +30,9 @@ from typing import Any, get_type_hints
 from mcp.server.mcpserver import Context, MCPServer
 
 from core.errors import PolicyDenied
+from core.observability import NOOP, Trace, TraceContent, Tracer
 from core.policy.engine import PolicyEngine
+from core.policy.rules import Decision
 from core.tools import envelope
 from core.types import Citation
 from mcp_servers.common.auth import caller_from_context
@@ -50,10 +57,19 @@ ToolFn = Callable[..., Awaitable[ToolOutput]]
 
 
 class GuardedServer:
-    def __init__(self, name: str, engine: PolicyEngine, secret: str):
+    def __init__(
+        self,
+        name: str,
+        engine: PolicyEngine,
+        secret: str,
+        tracer: Tracer = NOOP,
+        trace_content: TraceContent | None = None,
+    ):
         self.name = name
         self.engine = engine
         self.secret = secret
+        self.tracer = tracer  # set by the process serving it (`serve`), if tracing is on
+        self.trace_content = trace_content or TraceContent()
         self.mcp = MCPServer(name)
         self.guarded: set[str] = set()
 
@@ -90,36 +106,62 @@ class GuardedServer:
     async def _run(
         self, qualified: str, fn: ToolFn, ctx: Context, arguments: dict[str, Any]
     ) -> dict[str, Any]:
+        meta = ctx.request_context.meta or {}
+        carrier = meta.get(envelope.TRACE_META_KEY) if isinstance(meta, dict) else None
+        trace = Trace.continuing(
+            self.tracer, carrier if isinstance(carrier, dict) else None, self.trace_content
+        )
+        attributes = {"tool.name": qualified, "tool.arguments": trace.masked(arguments)}
+        with trace.span(f"{qualified} (server)", "tool", **attributes) as span:
+            result = await self._guarded(qualified, fn, ctx, arguments, span)
+            span.set(**{"tool.ok": result["ok"], "tool.error": result.get("error")})
+            if not result["ok"]:
+                span.fail(result["error"])
+            return result
+
+    async def _guarded(
+        self, qualified: str, fn: ToolFn, ctx: Context, arguments: dict[str, Any], span: Trace
+    ) -> dict[str, Any]:
         try:
             caller = caller_from_context(ctx, self.secret)
         except PolicyDenied as exc:
             logger.warning("%s refused: %s", qualified, exc)
+            span.set(refused="no valid caller token")
             return envelope.error("denied")
+        span.set(user=caller.id, role=caller.role)
 
         decision = self.engine.authorize(caller, qualified, arguments)
+        span.set(**{"policy.arguments": _verdict(decision)})
         if not decision.allow:
             logger.info("%s denied for %s: %s", qualified, caller.id, decision.reason)
             return envelope.error("denied")
 
-        try:
-            output = await fn(caller, **arguments)
-        except LookupError:
-            return envelope.error("not_found")
-        except ToolInputError as exc:
-            return envelope.error("invalid_arguments", [str(exc)])
-        except PolicyDenied:
-            return envelope.error("denied")
-        except Exception:
-            logger.exception("%s failed", qualified)
-            return envelope.error("upstream_error")
+        with span.span(f"{qualified} handler", "chain") as run:  # the tool: the client's systems
+            try:
+                output = await fn(caller, **arguments)
+            except LookupError:
+                run.set(error="not_found")
+                return envelope.error("not_found")
+            except ToolInputError as exc:
+                run.set(error="invalid_arguments")
+                return envelope.error("invalid_arguments", [str(exc)])
+            except PolicyDenied:
+                run.set(error="denied")
+                return envelope.error("denied")
+            except Exception as exc:
+                logger.exception("%s failed", qualified)
+                run.fail(type(exc).__name__)
+                return envelope.error("upstream_error")
 
         if output.record is not None:
             decision = self.engine.authorize(caller, qualified, arguments, record=output.record)
+            span.set(**{"policy.record": _verdict(decision)})
             if not decision.allow:
                 logger.info("%s denied on record for %s: %s", qualified, caller.id, decision.reason)
                 return envelope.error("denied")
 
         data = self.engine.filter(caller, qualified, output.data)
+        span.set(output=span.text(data), citations=len(output.citations))
         return envelope.ok(data, output.citations)
 
     async def tool_names(self) -> list[str]:
@@ -129,3 +171,7 @@ class GuardedServer:
     async def unguarded_tools(self) -> list[str]:
         """Tools registered on the MCP server without going through `tool()`. Should be none."""
         return sorted(t.name for t in await self.mcp.list_tools() if t.name not in self.guarded)
+
+
+def _verdict(decision: Decision) -> str:
+    return "allowed" if decision.allow else f"denied: {decision.reason or 'no reason given'}"

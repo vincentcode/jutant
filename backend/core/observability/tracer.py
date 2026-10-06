@@ -4,6 +4,10 @@ A span is one step of a turn (routing, a model call, a tool call) with its attri
 are given their parent explicitly rather than through ambient context: a turn is an async
 generator that pauses between events, and ambient context does not survive those pauses.
 
+A trace crosses processes as a carrier, a few strings (W3C `traceparent`) a span gives with
+`carrier()` and a tracer turns back into a parent with `remote()`: a tool call passes its span
+to the MCP server, whose spans then join the same trace.
+
 Attribute keys are the core's own; a provider translates them to its backend's conventions:
 
     session, user, role          who is asking, in which conversation
@@ -28,6 +32,9 @@ SpanKind = Literal["agent", "chain", "llm", "tool", "retriever", "embedding"]
 class Span(Protocol):
     def set(self, attributes: Mapping[str, Any]) -> None: ...
     def fail(self, reason: str) -> None: ...
+    def carrier(self) -> dict[str, str]:
+        """This span as strings another process can continue the trace from."""
+        ...
 
 
 class Tracer(Protocol):
@@ -42,6 +49,10 @@ class Tracer(Protocol):
         leaving the block marks the span failed and is re-raised."""
         ...
 
+    def remote(self, carrier: Mapping[str, str]) -> Span | None:
+        """A parent for spans continuing a trace begun in another process, or None."""
+        ...
+
 
 class _NoopSpan:
     def set(self, attributes: Mapping[str, Any]) -> None:
@@ -50,6 +61,9 @@ class _NoopSpan:
     def fail(self, reason: str) -> None:
         pass
 
+    def carrier(self) -> dict[str, str]:
+        return {}
+
 
 class NoopTracer:
     @contextmanager
@@ -57,6 +71,9 @@ class NoopTracer:
         self, name: str, kind: SpanKind, attributes: Mapping[str, Any], parent: Span | None
     ) -> Iterator[Span]:
         yield _NoopSpan()
+
+    def remote(self, carrier: Mapping[str, str]) -> Span | None:
+        return None
 
 
 NOOP = NoopTracer()
@@ -89,6 +106,18 @@ class Trace:
     def fail(self, reason: str) -> None:
         if self._span is not None:
             self._span.fail(reason)
+
+    def carrier(self) -> dict[str, str]:
+        """The current span, for another process to continue the trace from."""
+        return self._span.carrier() if self._span is not None else {}
+
+    @classmethod
+    def continuing(
+        cls, tracer: Tracer, carrier: Mapping[str, Any] | None, content: TraceContent | None = None
+    ) -> "Trace":
+        """A trace whose spans join the one `carrier` came from (a new one if it is empty)."""
+        valid = {k: v for k, v in (carrier or {}).items() if isinstance(v, str)}
+        return cls(tracer, content, tracer.remote(valid) if valid else None)
 
     def text(self, value: Any) -> Any:
         """`value` masked, if content may be traced; else None, so it is left out."""

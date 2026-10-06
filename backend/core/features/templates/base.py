@@ -151,7 +151,7 @@ async def call_tool(
     attributes = {"tool.name": call.name, "tool.arguments": trace.masked(call.arguments)}
     with trace.span(call.name, "tool", **attributes) as span:
         try:
-            result = await gateway.execute(caller, feature, call, conversation_id)
+            result = await gateway.execute(caller, feature, call, conversation_id, span.carrier())
         except (InvalidToolCall, UnknownTool) as exc:
             result = ToolResult(
                 call.id, ok=False, data={"problems": [str(exc)]}, error="invalid_arguments"

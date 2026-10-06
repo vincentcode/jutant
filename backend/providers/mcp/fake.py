@@ -1,6 +1,6 @@
 """FakeToolClient: canned tool results for tests."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -14,6 +14,7 @@ Result = ToolResult | Callable[[dict[str, Any]], ToolResult]
 class RecordedCall:
     caller: Caller
     call: ToolCall
+    trace_context: Mapping[str, str] | None = None
 
 
 class FakeToolClient:
@@ -36,8 +37,10 @@ class FakeToolClient:
     async def list_tools(self) -> list[ToolSpec]:
         return list(self.specs)
 
-    async def call(self, caller: Caller, call: ToolCall) -> ToolResult:
-        self.calls.append(RecordedCall(caller, call))
+    async def call(
+        self, caller: Caller, call: ToolCall, trace_context: Mapping[str, str] | None = None
+    ) -> ToolResult:
+        self.calls.append(RecordedCall(caller, call, trace_context))
         result = self.results.get(call.name)
         if callable(result):
             result = result(call.arguments)

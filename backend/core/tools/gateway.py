@@ -12,6 +12,7 @@ Identity arguments are removed before validation, so a model that adds `user_id`
 with a strict schema still gets its call through without that argument.
 """
 
+from collections.abc import Mapping
 from typing import Any
 
 from core.errors import InvalidToolCall, UnknownTool
@@ -33,6 +34,7 @@ class ToolGateway:
         feature: Feature,
         call: ToolCall,
         conversation_id: str | None = None,
+        trace_context: Mapping[str, str] | None = None,
     ) -> ToolResult:
         detail: dict[str, Any] = {
             "tool": call.name,
@@ -60,7 +62,9 @@ class ToolGateway:
                 call_id=call.id, ok=False, data={"problems": problems}, error="invalid_arguments"
             )
 
-        result = await self.client.call(caller, ToolCall(call.id, call.name, arguments))
+        result = await self.client.call(
+            caller, ToolCall(call.id, call.name, arguments), trace_context
+        )
         if result.ok:
             await self.audit.record(caller, "tool_called", detail)
         elif result.error == "denied":

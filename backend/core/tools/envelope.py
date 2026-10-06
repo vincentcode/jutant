@@ -14,6 +14,8 @@ from typing import Any, get_args
 from core.types import Citation, ToolError, ToolResult
 
 CALLER_META_KEY = "jutant/caller"
+# The caller's trace (a W3C traceparent carrier), so the server's spans join it.
+TRACE_META_KEY = "jutant/trace"
 ERRORS = frozenset(get_args(ToolError))
 
 
