@@ -73,4 +73,26 @@ describe('chatStreamReducer', () => {
     })
     expect(kept.switchedFrom).toBeUndefined()
   })
+
+  it('keeps an unclear reply until the next question', () => {
+    let state = chatStreamReducer(initialStreamState, { event: 'start', data: { question: 'blue', at: 1 } })
+    state = chatStreamReducer(state, {
+      event: 'reply_unclear',
+      data: { step_order: 2, step_title: 'Find the block reason' },
+    })
+    expect(state.unclear).toEqual({ stepOrder: 2, stepTitle: 'Find the block reason' })
+    state = chatStreamReducer(state, { event: 'start', data: { question: 'blue', at: 2 } })
+    expect(state.unclear).toBeUndefined()
+  })
+
+  it('keeps the subject question until the next question', () => {
+    let state = chatStreamReducer(initialStreamState, { event: 'start', data: { question: 'why?', at: 1 } })
+    state = chatStreamReducer(state, {
+      event: 'subject_unclear',
+      data: { subject_id: 3, subject_title: 'Transaction lookup: transfer TX-0002' },
+    })
+    expect(state.subjectUnclear).toEqual({ subjectId: 3, subjectTitle: 'Transaction lookup: transfer TX-0002' })
+    state = chatStreamReducer(state, { event: 'start', data: { question: 'why?', at: 2 } })
+    expect(state.subjectUnclear).toBeUndefined()
+  })
 })

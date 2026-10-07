@@ -44,6 +44,8 @@ export interface Answer {
 export type StreamEvent =
   | { event: 'queued'; data: { position: number } }
   | { event: 'feature_selected'; data: { feature_id: string; switched_from?: string | null } }
+  | { event: 'reply_unclear'; data: { step_order: number; step_title: string } }
+  | { event: 'subject_unclear'; data: { subject_id: number; subject_title: string } }
   | { event: 'tool_started'; data: { call: ToolCall; label?: string | null } }
   | { event: 'tool_finished'; data: { result: ToolResult } }
   | { event: 'text_delta'; data: { text: string } }

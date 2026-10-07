@@ -115,6 +115,47 @@ export interface paths {
         patch: operations["rename_api_conversations__conversation_id__patch"];
         trace?: never;
     };
+    "/api/conversations/{conversation_id}/subjects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Subjects
+         * @description The subjects open in the conversation, current first, for staff to return to.
+         */
+        get: operations["subjects_api_conversations__conversation_id__subjects_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/conversations/{conversation_id}/procedure": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Procedure
+         * @description The procedure in progress and the step it waits on (paused while staff ask other
+         *     things), or null.
+         */
+        get: operations["procedure_api_conversations__conversation_id__procedure_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/conversations/{conversation_id}/messages": {
         parameters: {
             query?: never;
@@ -285,6 +326,10 @@ export interface components {
             feature_id?: string | null;
             /** Preferred Feature Id */
             preferred_feature_id?: string | null;
+            /** Reply As */
+            reply_as?: ("answer" | "question" | "resume" | "stop" | "return" | "continue") | null;
+            /** Subject Id */
+            subject_id?: number | null;
             /** Upload Id */
             upload_id?: string | null;
         };
@@ -504,6 +549,22 @@ export interface components {
              */
             created_at: string;
         };
+        /**
+         * ProcedureOut
+         * @description The procedure in progress in a conversation, and the step it waits on.
+         */
+        ProcedureOut: {
+            /** Playbook Id */
+            playbook_id: string;
+            /** Playbook Title */
+            playbook_title: string;
+            /** Step Order */
+            step_order: number;
+            /** Step Title */
+            step_title: string;
+            /** Paused */
+            paused: boolean;
+        };
         /** QuickActionOut */
         QuickActionOut: {
             /** Label */
@@ -542,6 +603,20 @@ export interface components {
             choices: string[];
             /** Answered */
             answered?: string | null;
+        };
+        /**
+         * SubjectOut
+         * @description One subject open in a conversation, for staff to return to with a click.
+         */
+        SubjectOut: {
+            /** Id */
+            id: number;
+            /** Title */
+            title: string;
+            /** Procedure */
+            procedure: boolean;
+            /** Current */
+            current: boolean;
         };
         /** UploadOut */
         UploadOut: {
@@ -776,6 +851,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConversationOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    subjects_api_conversations__conversation_id__subjects_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubjectOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    procedure_api_conversations__conversation_id__procedure_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProcedureOut"] | null;
                 };
             };
             /** @description Validation Error */

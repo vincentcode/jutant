@@ -19,6 +19,8 @@ export interface ChatStreamState {
   queuePosition?: number
   featureId?: string
   switchedFrom?: string // the quick action staff had chosen, when the question was for another feature
+  unclear?: { stepOrder: number; stepTitle: string } // asked during a procedure: answer or question?
+  subjectUnclear?: { subjectId: number; subjectTitle: string } // asked: about this subject, or new?
   text: string
   tools: ToolActivityItem[]
   citations: Citation[]
@@ -57,6 +59,13 @@ export function chatStreamReducer(state: ChatStreamState, action: ChatAction): C
         featureId: action.data.feature_id,
         switchedFrom: action.data.switched_from ?? undefined,
       }
+    case 'subject_unclear':
+      return {
+        ...state,
+        subjectUnclear: { subjectId: action.data.subject_id, subjectTitle: action.data.subject_title },
+      }
+    case 'reply_unclear':
+      return { ...state, unclear: { stepOrder: action.data.step_order, stepTitle: action.data.step_title } }
     case 'tool_started':
       return {
         ...state,

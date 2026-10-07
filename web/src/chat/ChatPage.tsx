@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { CircleUserRound, X } from 'lucide-react'
+import { CircleUserRound, ListChecks, Undo2, X } from 'lucide-react'
 import * as api from '../api/endpoints'
 import type { Upload } from '../api/endpoints'
+import type { ReplyAs } from '../api/stream'
 import { useAppInfo, useTheme } from '../app/appearance'
 import { useAuth } from '../auth/AuthProvider'
 import { HomeScreen } from '../home/HomeScreen'
@@ -46,11 +47,25 @@ export function ChatPage() {
     queryFn: () => api.history(conversationId!),
     enabled: Boolean(conversationId),
   })
+  // The subjects open in the conversation: earlier ones are offered as chips to return to.
+  const subjects = useQuery({
+    queryKey: ['subjects', conversationId],
+    queryFn: () => api.subjects(conversationId!),
+    enabled: Boolean(conversationId),
+  })
+  // A procedure paused while staff ask other things, to offer Resume and Stop.
+  const procedure = useQuery({
+    queryKey: ['procedure', conversationId],
+    queryFn: () => api.procedure(conversationId!),
+    enabled: Boolean(conversationId),
+  })
 
   const onSettled = useCallback(
     (id: string) => {
       void queryClient.invalidateQueries({ queryKey: ['history', id] })
       void queryClient.invalidateQueries({ queryKey: ['conversations'] })
+      void queryClient.invalidateQueries({ queryKey: ['procedure', id] })
+      void queryClient.invalidateQueries({ queryKey: ['subjects', id] })
     },
     [queryClient],
   )
@@ -97,14 +112,17 @@ export function ChatPage() {
 
   // The quick action is a preference: the server keeps to it unless the question is clearly
   // for another feature. With a file attached, the chosen feature reads it, whatever the words.
-  async function ask(text: string, feature = featureId) {
+  // During a procedure, `replyAs` says what the message is (an answer clicked on the step card,
+  // Resume, Stop...), so the server does not need to read it.
+  async function ask(text: string, feature = featureId, replyAs?: ReplyAs, subjectId?: number) {
     const id = await ensureConversation()
     setStreamFor(id)
+    const said = { reply_as: replyAs, subject_id: subjectId }
     void send(
       id,
       attachment
-        ? { text, feature_id: feature, upload_id: attachment.upload_id }
-        : { text, preferred_feature_id: feature },
+        ? { text, feature_id: feature, upload_id: attachment.upload_id, ...said }
+        : { text, preferred_feature_id: feature, ...said },
     )
   }
 
@@ -234,10 +252,41 @@ export function ChatPage() {
               messages={history.data ?? []}
               stream={streamFor === conversationId ? state : undefined}
               busy={busy}
-              onAnswerStep={(answer) => void ask(answer)}
+              onAnswerStep={(answer) => void ask(answer, undefined, 'answer')}
               onRate={rate}
               featureTitles={featureTitles}
             />
+            {streamFor === conversationId && state.unclear && state.question && !busy && (
+              <ReplyUnclear
+                question={state.question}
+                step={state.unclear}
+                onAnswer={() => void ask(state.question!, undefined, 'answer')}
+                onQuestion={() => void ask(state.question!, undefined, 'question')}
+              />
+            )}
+            {streamFor === conversationId && state.subjectUnclear && state.question && !busy && (
+              <WhichSubject
+                question={state.question}
+                subject={shortTitle(state.subjectUnclear.subjectTitle)}
+                onSame={() =>
+                  void ask(state.question!, undefined, 'continue', state.subjectUnclear!.subjectId)
+                }
+                onNew={() => void ask(state.question!, undefined, 'question')}
+              />
+            )}
+            {!busy && (
+              <EarlierSubjects
+                subjects={(subjects.data ?? []).filter((s) => !s.current && !s.procedure)}
+                onReturn={(subject) => void ask(`Back to ${shortTitle(subject.title)}`, undefined, 'return', subject.id)}
+              />
+            )}
+            {procedure.data?.paused && !busy && (
+              <PausedProcedure
+                procedure={procedure.data}
+                onResume={() => void ask('Resume the procedure', undefined, 'resume')}
+                onStop={() => void ask('Stop the procedure', undefined, 'stop')}
+              />
+            )}
             {streamFor === conversationId && state.switchedFrom && state.featureId && (
               <p role="status" className="mx-auto mb-1 w-full max-w-3xl px-5 text-xs text-muted">
                 Switched from {featureTitles[state.switchedFrom] ?? 'your quick action'} to{' '}
@@ -260,4 +309,124 @@ export function ChatPage() {
       </main>
     </div>
   )
+}
+
+/** Staff's message during a procedure could not be read as an answer or a new question. */
+function ReplyUnclear({
+  question,
+  step,
+  onAnswer,
+  onQuestion,
+}: {
+  question: string
+  step: { stepOrder: number; stepTitle: string }
+  onAnswer: () => void
+  onQuestion: () => void
+}) {
+  return (
+    <div role="group" aria-label="Answer or new question?" className="mx-auto mb-2 flex w-full max-w-3xl flex-wrap items-center gap-2 px-5 text-sm">
+      <span className="text-muted">
+        Is “{question}” your answer to step {step.stepOrder} ({step.stepTitle}), or a new question?
+      </span>
+      <button type="button" className="chip" onClick={onAnswer}>
+        My answer to step {step.stepOrder}
+      </button>
+      <button type="button" className="chip" onClick={onQuestion}>
+        A new question
+      </button>
+    </div>
+  )
+}
+
+/** A procedure waiting on its step while staff ask other things. */
+function PausedProcedure({
+  procedure,
+  onResume,
+  onStop,
+}: {
+  procedure: api.Procedure
+  onResume: () => void
+  onStop: () => void
+}) {
+  return (
+    <div
+      role="status"
+      className="mx-auto mb-2 flex w-full max-w-3xl flex-wrap items-center gap-2 rounded-xl border border-line bg-accent-soft px-4 py-2 text-sm"
+    >
+      <ListChecks aria-hidden className="size-4 text-accent" />
+      <span className="flex-1">
+        <strong className="font-semibold">{procedure.playbook_title}</strong> · paused at step{' '}
+        {procedure.step_order} ({procedure.step_title})
+      </span>
+      <button type="button" className="btn px-3 py-1 text-sm" onClick={onResume}>
+        Resume
+      </button>
+      <button type="button" className="btn-link text-sm" onClick={onStop}>
+        Stop
+      </button>
+    </div>
+  )
+}
+
+/** The message could be about an open subject or something new, and the assistant could not
+ * tell: staff say which, and it is asked again saying so. */
+function WhichSubject({
+  question,
+  subject,
+  onSame,
+  onNew,
+}: {
+  question: string
+  subject: string
+  onSame: () => void
+  onNew: () => void
+}) {
+  return (
+    <div role="group" aria-label="Which subject?" className="mx-auto mb-2 flex w-full max-w-3xl flex-wrap items-center gap-2 px-5 text-sm">
+      <span className="text-muted">
+        Is “{question}” about {subject}, or something new?
+      </span>
+      <button type="button" className="chip" onClick={onSame}>
+        About {subject}
+      </button>
+      <button type="button" className="chip" onClick={onNew}>
+        Something new
+      </button>
+    </div>
+  )
+}
+
+/** Earlier subjects of the conversation: a click returns to one, so its details (a transfer, a
+ * product) are used again without repeating them. */
+function EarlierSubjects({
+  subjects,
+  onReturn,
+}: {
+  subjects: api.Subject[]
+  onReturn: (subject: api.Subject) => void
+}) {
+  if (subjects.length === 0) return null
+  return (
+    <div role="group" aria-label="Earlier subjects" className="mx-auto mb-2 flex w-full max-w-3xl flex-wrap items-center gap-1.5 px-5 text-xs">
+      <span className="text-muted">Back to:</span>
+      {subjects.map((subject) => (
+        <button
+          key={subject.id}
+          type="button"
+          className="chip px-2.5 py-0.5 text-xs"
+          title={subject.title}
+          onClick={() => onReturn(subject)}
+        >
+          <Undo2 aria-hidden className="size-3" />
+          {shortTitle(subject.title)}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/** "Transaction lookup: transfer TX-0002" -> "transfer TX-0002": what the subject is about. */
+export function shortTitle(title: string): string {
+  const about = title.split(': ').slice(1).join(': ')
+  return about || title
 }

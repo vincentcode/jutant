@@ -27,6 +27,16 @@ export const startConversation = () => apiJson<Conversation>('/conversations', {
 export const history = (conversationId: string) =>
   apiJson<HistoryMessage[]>(`/conversations/${conversationId}/messages`)
 
+/** The subjects open in a conversation, current first, for staff to return to. */
+export type Subject = Schemas['SubjectOut']
+export const subjects = (conversationId: string) =>
+  apiJson<Subject[]>(`/conversations/${conversationId}/subjects`)
+
+/** The procedure in progress and the step it waits on, or null. */
+export type Procedure = Schemas['ProcedureOut']
+export const procedure = (conversationId: string) =>
+  apiJson<Procedure | null>(`/conversations/${conversationId}/procedure`)
+
 export function upload(conversationId: string, file: File): Promise<Upload> {
   const body = new FormData()
   body.append('file', file)
