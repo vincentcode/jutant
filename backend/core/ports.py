@@ -34,6 +34,7 @@ AUDIT_EVENTS = (
     "document_uploaded",
     "feedback_given",
     "conversation_deleted",
+    "turn_read",  # what a message did to the conversation's context, and what decided it
 )
 
 
@@ -75,6 +76,12 @@ class ConversationStore(Protocol):
         back by `recent_messages` as part of the message's text. `trace_context` is the
         turn's trace, so feedback on the answer can be attached to it."""
         ...
+
+    async def context(self, conversation_id: UUID) -> dict[str, Any]:
+        """What staff are talking about, as kept after the last turn (empty at first)."""
+        ...
+
+    async def save_context(self, conversation_id: UUID, context: dict[str, Any]) -> None: ...
 
 
 class PlaybookStore(Protocol):

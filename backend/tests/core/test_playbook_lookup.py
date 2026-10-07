@@ -102,7 +102,7 @@ async def test_the_reference_is_looked_up_and_its_status_picks_the_branch() -> N
     rig, conversation = await started_run()
 
     events = await collect_events(
-        rig.orchestrator.ask(teller(), conversation, "the reference is tx-0002")
+        rig.orchestrator.ask(teller(), conversation, "the reference is tx-0002", reply_as="answer")
     )
 
     [call] = [e.call for e in events if isinstance(e, ToolStarted)]
@@ -120,15 +120,19 @@ async def test_the_reference_is_looked_up_and_its_status_picks_the_branch() -> N
 
 async def test_the_record_stays_with_the_run_for_later_steps() -> None:
     rig, conversation = await started_run()
-    await collect_events(rig.orchestrator.ask(teller(), conversation, "TX-0002"))
-    events = await collect_events(rig.orchestrator.ask(teller(), conversation, "cancel? no"))
+    await collect_events(rig.orchestrator.ask(teller(), conversation, "TX-0002", reply_as="answer"))
+    events = await collect_events(
+        rig.orchestrator.ask(teller(), conversation, "cancel? no", reply_as="answer")
+    )
     # an unclear reply re-shows the step, still filled from the stored record
     assert shown(events)[0].instruction == "Failed: Beneficiary account closed (code E51)."
 
 
 async def test_a_reply_without_a_reference_is_asked_again() -> None:
     rig, conversation = await started_run()
-    events = await collect_events(rig.orchestrator.ask(teller(), conversation, "12345678"))
+    events = await collect_events(
+        rig.orchestrator.ask(teller(), conversation, "12345678", reply_as="answer")
+    )
     assert not any(isinstance(e, ToolStarted) for e in events)
     assert "could not find a reference" in "".join(
         e.text for e in events if isinstance(e, TextDelta)
@@ -138,7 +142,9 @@ async def test_a_reply_without_a_reference_is_asked_again() -> None:
 
 async def test_an_unknown_reference_keeps_the_run_on_the_step() -> None:
     rig, conversation = await started_run()
-    events = await collect_events(rig.orchestrator.ask(teller(), conversation, "TX-0404"))
+    events = await collect_events(
+        rig.orchestrator.ask(teller(), conversation, "TX-0404", reply_as="answer")
+    )
     text = "".join(e.text for e in events if isinstance(e, TextDelta))
     assert "No record was found for TX-0404" in text
     assert shown(events)[0].order == 1
@@ -146,7 +152,9 @@ async def test_an_unknown_reference_keeps_the_run_on_the_step() -> None:
 
 async def test_a_refused_record_keeps_the_run_on_the_step_and_shows_nothing() -> None:
     rig, conversation = await started_run()
-    events = await collect_events(rig.orchestrator.ask(teller(), conversation, "TX-0009"))
+    events = await collect_events(
+        rig.orchestrator.ask(teller(), conversation, "TX-0009", reply_as="answer")
+    )
     text = "".join(e.text for e in events if isinstance(e, TextDelta))
     assert "You don't have access to TX-0009" in text
     assert shown(events)[0].order == 1
@@ -154,6 +162,8 @@ async def test_a_refused_record_keeps_the_run_on_the_step_and_shows_nothing() ->
 
 async def test_a_status_that_is_no_choice_is_asked() -> None:
     rig, conversation = await started_run()
-    events = await collect_events(rig.orchestrator.ask(teller(), conversation, "TX-0003"))
+    events = await collect_events(
+        rig.orchestrator.ask(teller(), conversation, "TX-0003", reply_as="answer")
+    )
     [step] = shown(events)
     assert step.order == 2 and step.instruction == "Which status does TX-0003 show?"

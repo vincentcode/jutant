@@ -35,6 +35,7 @@ class DjangoPlaybookStore:
             status=state.status,
             feature_id=state.feature_id,
             facts=state.facts,
+            paused=state.paused,
         )
 
 
@@ -69,4 +70,5 @@ def to_state(run: PlaybookRun) -> PlaybookRunState:
         status=run.status,
         feature_id=run.feature_id,
         facts={int(k): v for k, v in (run.facts or {}).items()},
+        paused=run.paused,
     )

@@ -50,6 +50,11 @@ def add_message(
     return message
 
 
+def save_context(*, conversation_id: UUID, context: dict[str, Any]) -> None:
+    """Keep the conversation's context (its stack of subjects) for the next turn."""
+    Conversation.objects.filter(id=conversation_id).update(context=context)
+
+
 def _title(content: str) -> str:
     text = " ".join(content.split())
     return text if len(text) <= TITLE_LENGTH else text[: TITLE_LENGTH - 1].rstrip() + "…"

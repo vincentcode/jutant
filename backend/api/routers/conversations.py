@@ -20,6 +20,8 @@ from api.schemas import (
     FeedbackIn,
     FeedbackOut,
     MessageOut,
+    ProcedureOut,
+    SubjectOut,
 )
 from api.sse import step_out
 from apps.conversation.adapters import Rating
@@ -75,6 +77,45 @@ async def delete(
         raise NOT_FOUND
     await runtime.orchestrator.audit.record(
         caller, "conversation_deleted", {"conversation_id": str(conversation_id)}
+    )
+
+
+@router.get("/{conversation_id}/subjects")
+async def subjects(
+    conversation_id: UUID,
+    caller: Caller = Depends(get_caller),
+    runtime: Runtime = Depends(get_runtime),
+) -> list[SubjectOut]:
+    """The subjects open in the conversation, current first, for staff to return to."""
+    await _owned(runtime, conversation_id, caller)
+    open_ = await runtime.orchestrator.subjects(conversation_id)
+    return [
+        SubjectOut(id=id_, title=title, procedure=procedure, current=index == 0)
+        for index, (id_, title, procedure) in enumerate(open_)
+    ]
+
+
+@router.get("/{conversation_id}/procedure")
+async def procedure(
+    conversation_id: UUID,
+    caller: Caller = Depends(get_caller),
+    runtime: Runtime = Depends(get_runtime),
+) -> ProcedureOut | None:
+    """The procedure in progress and the step it waits on (paused while staff ask other
+    things), or null."""
+    await _owned(runtime, conversation_id, caller)
+    orchestrator = runtime.orchestrator
+    run = await orchestrator.playbooks.get_run(conversation_id)
+    current = await orchestrator.runner.current(conversation_id)
+    if run is None or current is None:
+        return None
+    title, step = current
+    return ProcedureOut(
+        playbook_id=run.playbook_id,
+        playbook_title=title,
+        step_order=step.order,
+        step_title=step.title,
+        paused=run.paused,
     )
 
 
@@ -174,6 +215,8 @@ async def ask(
             body.feature_id,
             upload_text,
             preferred_feature_id=body.preferred_feature_id,
+            reply_as=body.reply_as,
+            subject_id=body.subject_id,
         )
 
     return StreamingResponse(

@@ -38,6 +38,7 @@ class Message:
     tool_calls: tuple[ToolCall, ...] = ()
     created_at: datetime | None = None
     feature_id: str | None = None  # an answer's: the feature that gave it
+    citations: tuple["Citation", ...] = ()  # an answer's sources
 
 
 @dataclass(frozen=True)
@@ -74,6 +75,20 @@ class ArgumentSource:
     question: bool = False  # the whole question
     match: str | None = None  # a regular expression: its first group (or the whole match)
     value: Any = None  # a fixed value
+    entity: str | None = None  # the conversation's current entity of this type (a transfer)
+
+
+@dataclass(frozen=True)
+class EntityType:
+    """A kind of thing staff talk about, declared by the pack (a transfer, a product), and how
+    to recognise one in text: `pattern` matches its id (first group, or the whole match)."""
+
+    name: str
+    pattern: str
+    words: tuple[str, ...] = ()  # what staff call it: "transfer", "payment"
+    # In a tool result, the field holding one's name ("Standard Savings" for SAV-STD), so a
+    # later message using the name points to it.
+    name_field: str | None = None
 
 
 @dataclass(frozen=True)
@@ -150,6 +165,7 @@ class PlaybookRunState:
     status: PlaybookRunStatus = "active"
     feature_id: str = ""  # the feature that started the run, for history and audit
     facts: dict[int, dict[str, Any]] = field(default_factory=dict)  # step order -> record
+    paused: bool = False  # staff asked something else; the run waits on its step until resumed
 
 
 @dataclass(frozen=True)

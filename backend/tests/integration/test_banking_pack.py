@@ -46,6 +46,7 @@ async def banking_assistant(model: FakeModel):
             gateway=ToolGateway(tools, ToolCatalog(tools), audit),
             system_prompt=pack.system_prompt,
             extraction_schemas=pack.extraction_schemas,
+            entity_types=pack.entity_types,
         )
         await orchestrator.load_tools()
         yield orchestrator
@@ -75,6 +76,7 @@ async def test_teller_asks_why_a_transfer_failed() -> None:
     assert [s.name for s in model.calls[0].tools] == [
         "transactions.list",
         "transactions.get_status",
+        "documents.search",  # for the failure code's explanation
     ]
 
 
@@ -135,7 +137,9 @@ async def test_router_and_playbook_from_the_pack() -> None:
 async def test_failed_transfer_procedure_looks_the_transfer_up_and_takes_its_branch() -> None:
     """The pack's own procedure, on the real tools and the fake bank: the reference is looked
     up, the transfer's status picks the branch, and the step quotes the failure reason."""
-    model = FakeModel(replies=[ModelReply("failed_transfer")])  # which procedure; no more
+    model = FakeModel(
+        replies=[ModelReply("failed_transfer")]  # which procedure; nothing else
+    )
     conversation = uuid4()
     async with banking_assistant(model) as assistant:
         await collect_events(
@@ -150,7 +154,9 @@ async def test_failed_transfer_procedure_looks_the_transfer_up_and_takes_its_bra
     assert step.title == "Explain the failure"
     assert "Beneficiary account closed (code E51)" in step.instruction
     assert events[-1].answer.citations == (Citation("record", "Transaction", "TX-0002"),)
-    assert len(model.calls) == 1  # the record answered the status step, not the model
+    # "It is TX-0002" is the reference step's answer by its pattern, and the record answered
+    # the status step: only choosing the procedure needed the model.
+    assert len(model.calls) == 1
 
 
 async def test_the_procedure_cannot_look_up_another_branchs_transfer() -> None:
@@ -161,7 +167,9 @@ async def test_the_procedure_cannot_look_up_another_branchs_transfer() -> None:
         await collect_events(
             assistant.ask(kojo, conversation, "failed transfer", "troubleshooting")
         )
-        events = await collect_events(assistant.ask(kojo, conversation, "TX-0002"))
+        events = await collect_events(
+            assistant.ask(kojo, conversation, "TX-0002", reply_as="answer")
+        )
 
     text = "".join(e.text for e in events if isinstance(e, TextDelta))
     assert "You don't have access to TX-0002" in text

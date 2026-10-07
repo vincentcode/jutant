@@ -4,6 +4,7 @@ Staff read only their own conversations: every query that returns one takes the 
 """
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from django.db.models import Q
@@ -14,6 +15,12 @@ from apps.conversation.models import Conversation, Feedback, Message, Upload
 def get_conversation(*, conversation_id: UUID, staff_id: str) -> Conversation | None:
     """The conversation if it belongs to `staff_id`, else None (callers answer 404)."""
     return Conversation.objects.filter(id=conversation_id, staff_id=staff_id).first()
+
+
+def context(*, conversation_id: UUID) -> dict[str, Any]:
+    """The conversation's context (its stack of subjects), or empty."""
+    row = Conversation.objects.filter(id=conversation_id).values_list("context", flat=True).first()
+    return dict(row or {})
 
 
 def list_conversations(*, staff_id: str, search: str = "", limit: int = 50) -> list[Conversation]:

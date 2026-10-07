@@ -5,17 +5,27 @@ playbook...). A pack turns a template into a feature by giving it a prompt and a
 """
 
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 from uuid import UUID
 
+from core.context.entities import values_in
 from core.errors import InvalidToolCall, ModelUnavailable, UnknownTool
 from core.events import Event, Failed, TextDelta, ToolFinished, ToolStarted
 from core.features.prefetch import planned_calls
 from core.observability import Trace
 from core.ports import AuditSink, ModelProvider, PlaybookStore
-from core.types import Caller, Feature, Message, ModelReply, ToolCall, ToolResult, ToolSpec
+from core.types import (
+    Caller,
+    EntityType,
+    Feature,
+    Message,
+    ModelReply,
+    ToolCall,
+    ToolResult,
+    ToolSpec,
+)
 
 if TYPE_CHECKING:
     from core.playbooks.runner import PlaybookRunner
@@ -45,12 +55,17 @@ class FeatureContext:
     extraction_schemas: dict[str, list[str]] = field(default_factory=dict)
     results: list[ToolResult] = field(default_factory=list)  # filled by the tool loop
     trace: Trace = field(default_factory=Trace)  # the turn's span, for tool call spans
-    # What prefetch calls and searches read: the question, and for a follow-up the previous one.
-    lookup_text: str = ""
+    # The pack's entity types: a prefetched record's values that are ids of these (a failure
+    # code) let a second round of prefetch calls be made (the code's explanation).
+    entity_types: tuple[EntityType, ...] = ()
+    # What searches read: the question, with the subject's document or procedure step, if any.
+    search_text: str = ""
+    # The subject's current entities (type -> id), for prefetch calls: TX-0002 named earlier.
+    entities: dict[str, str] = field(default_factory=dict)
 
     @property
     def lookup(self) -> str:
-        return self.lookup_text or self.question
+        return self.search_text or self.question
 
 
 class FeatureTemplate(Protocol):
@@ -60,13 +75,18 @@ class FeatureTemplate(Protocol):
     def run(self, ctx: FeatureContext) -> AsyncIterator[Event]: ...
 
 
-async def tool_loop(ctx: FeatureContext) -> AsyncIterator[Event]:
+async def tool_loop(
+    ctx: FeatureContext, extra_calls: Sequence[ToolCall] = ()
+) -> AsyncIterator[Event]:
     """Model, tool calls, model again, until the model answers in text.
 
-    The feature's prefetch calls whose arguments the question supplies are made first, in
-    code, and the model starts with their results. The model sees only the routed feature's
-    tools. Every call goes through the gateway. A failed call of the model's is returned to it
-    once so it can correct itself; a second failure ends the turn. The loop stops after
+    The feature's prefetch calls whose arguments the question (or the subject) supplies are
+    made first, in code, with any `extra_calls` the template adds; then a second round, for
+    calls that only the fetched records make possible (a record's failure code, looked up in
+    the codes' document). The model starts with their results. The model sees only the routed
+    feature's tools. Every call goes through the gateway. A failed call of the model's is
+    returned to it once so it can correct itself; a second failure ends the turn. The loop
+    stops after
     `max_steps` model calls.
 
     A small model sometimes answers from memory (inventing a source) or replies with nothing,
@@ -82,14 +102,24 @@ async def tool_loop(ctx: FeatureContext) -> AsyncIterator[Event]:
     """
     messages = list(ctx.messages)
     tools = ctx.gateway.catalog.specs_for(ctx.feature.tools)
-    for call in planned_calls(ctx.feature, ctx.lookup):
-        messages.append(Message("assistant", "", tool_calls=(call,)))
-        async for event in run_call(ctx, call):
-            yield event
-        if ctx.results[-1].error == DENIED:
-            yield Failed(DENIED)
-            return
-        messages.append(Message("tool", tool_message(ctx.results[-1]), tool_call_id=call.id))
+    made: set[tuple[str, str]] = set()
+    rounds = (
+        lambda: [*planned_calls(ctx.feature, ctx.lookup, ctx.entities), *extra_calls],
+        lambda: planned_calls(ctx.feature, ctx.lookup, {**_pointed_to(ctx), **ctx.entities}),
+    )
+    for plan in rounds:
+        for call in plan():
+            key = (call.name, json.dumps(call.arguments, sort_keys=True))
+            if key in made:
+                continue
+            made.add(key)
+            messages.append(Message("assistant", "", tool_calls=(call,)))
+            async for event in run_call(ctx, call):
+                yield event
+            if ctx.results[-1].error == DENIED:
+                yield Failed(DENIED)
+                return
+            messages.append(Message("tool", tool_message(ctx.results[-1]), tool_call_id=call.id))
 
     failures = 0
     nudged = False
@@ -132,6 +162,16 @@ async def tool_loop(ctx: FeatureContext) -> AsyncIterator[Event]:
             yield Failed(TOOL_FAILED)
             return
     yield Failed(STEP_LIMIT)
+
+
+def _pointed_to(ctx: FeatureContext) -> dict[str, str]:
+    """What the records fetched so far point to (exact ids in their values)."""
+    found: dict[str, str] = {}
+    for result in ctx.results:
+        if result.ok:
+            for kind, value in values_in(result.data, ctx.entity_types).items():
+                found.setdefault(kind, value)
+    return found
 
 
 async def run_call(ctx: FeatureContext, call: ToolCall) -> AsyncIterator[Event]:

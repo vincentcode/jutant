@@ -24,6 +24,7 @@ class InMemoryConversationStore:
     def __init__(self) -> None:
         self.owners: dict[UUID, str] = {}
         self.messages: dict[UUID, list[StoredMessage]] = {}
+        self.contexts: dict[UUID, dict[str, Any]] = {}
 
     async def create(self, caller: Caller) -> UUID:
         conversation_id = uuid4()
@@ -37,6 +38,7 @@ class InMemoryConversationStore:
                 stored.message,
                 content=as_text(stored.message.content, stored.steps),
                 feature_id=stored.feature_id,
+                citations=stored.citations,
             )
             for stored in self.messages.get(conversation_id, [])
         ]
@@ -53,6 +55,12 @@ class InMemoryConversationStore:
     ) -> None:
         stored = StoredMessage(message, feature_id, citations, steps, dict(trace_context or {}))
         self.messages.setdefault(conversation_id, []).append(stored)
+
+    async def context(self, conversation_id: UUID) -> dict[str, Any]:
+        return dict(self.contexts.get(conversation_id, {}))
+
+    async def save_context(self, conversation_id: UUID, context: dict[str, Any]) -> None:
+        self.contexts[conversation_id] = dict(context)
 
 
 class InMemoryPlaybookStore:

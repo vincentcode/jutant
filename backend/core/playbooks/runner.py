@@ -13,6 +13,9 @@ policy, audit, trace). The record is kept with the run, and later steps use it:
 - an instruction can quote the record: "Failed: {1.failure_reason}".
 
 A reference that is not found, or a record the caller may not see, keeps the run on the step.
+
+A run can be paused while staff ask about something else, and resumed on its step. It ends only
+when staff stop it (or it completes), and stopping it says so.
 """
 
 import re
@@ -33,6 +36,7 @@ PLACEHOLDER = re.compile(r"\{(\d+)\.(\w+)\}")
 
 FINISHED = "Procedure complete."
 STOPPED = "Stopped the procedure."
+STOPPED_NAMED = "Stopped the {title} procedure."
 NO_STEPS = "This procedure has no steps for you."
 UNKNOWN = "unknown"
 
@@ -78,7 +82,10 @@ class PlaybookRunner:
         conversation_id: UUID,
         user_input: str,
         lookup: Lookup | None = None,
+        choice: str | None = None,
     ) -> AsyncIterator[Event]:
+        """Take `user_input` as the answer to the current step. `choice`: the option it gives,
+        when that is already known (read with the message's intent)."""
         state = await self.store.get_run(conversation_id)
         if state is None:
             return
@@ -86,13 +93,14 @@ class PlaybookRunner:
         steps = steps_for(playbook, caller.audience)
         current = next((s for s in steps if s.order == state.current_order), None)
         text = user_input.strip()
+        state = replace(state, paused=False)
 
         if text.lower().rstrip(".!") in CANCEL_WORDS or current is None:
             await self.abandon(caller, conversation_id)
-            yield TextDelta(STOPPED)
+            yield TextDelta(STOPPED_NAMED.format(title=playbook.title))
             return
 
-        answer = await self._interpret(current, text)
+        answer = choice if _given(current, choice) else await self._interpret(current, text)
         if answer is None:
             yield TextDelta(_hint(current))
             yield PlaybookStepShown(state.playbook_id, _filled(current, state), playbook.title)
@@ -124,6 +132,40 @@ class PlaybookRunner:
             caller, conversation_id, state, steps, following, playbook.title
         ):
             yield event
+
+    async def current(self, conversation_id: UUID) -> tuple[str, PlaybookStep] | None:
+        """The run's playbook title and the step it waits on, if a run is in progress."""
+        state = await self.store.get_run(conversation_id)
+        if state is None:
+            return None
+        playbook = await self.store.get(state.playbook_id)
+        step = next((s for s in playbook.steps if s.order == state.current_order), None)
+        return (playbook.title, step) if step is not None else None
+
+    async def pause(self, conversation_id: UUID) -> None:
+        state = await self.store.get_run(conversation_id)
+        if state is not None and not state.paused:
+            await self.store.save_run(conversation_id, replace(state, paused=True))
+
+    async def resume(self, conversation_id: UUID) -> AsyncIterator[Event]:
+        """Show the step the run waits on again."""
+        state = await self.store.get_run(conversation_id)
+        if state is None:
+            return
+        playbook = await self.store.get(state.playbook_id)
+        state = replace(state, paused=False)
+        await self.store.save_run(conversation_id, state)
+        step = next((s for s in playbook.steps if s.order == state.current_order), None)
+        if step is not None:
+            yield PlaybookStepShown(state.playbook_id, _filled(step, state), playbook.title)
+
+    async def stop(self, caller: Caller, conversation_id: UUID) -> AsyncIterator[Event]:
+        state = await self.store.get_run(conversation_id)
+        if state is None:
+            return
+        playbook = await self.store.get(state.playbook_id)
+        await self.abandon(caller, conversation_id)
+        yield TextDelta(STOPPED_NAMED.format(title=playbook.title))
 
     async def _show(
         self,
@@ -188,6 +230,14 @@ class PlaybookRunner:
                 "answer": answer,
             },
         )
+
+
+def _given(step: PlaybookStep, choice: str | None) -> bool:
+    """`choice` already answers `step` (read with the message's intent): one of its options,
+    or "confirm" for a step that asks to confirm."""
+    return choice is not None and (
+        choice in step.choices or (step.expects == "confirm" and choice == "confirm")
+    )
 
 
 def _looked_up_value(step: PlaybookStep, text: str) -> str | None:

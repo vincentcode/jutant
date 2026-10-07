@@ -70,6 +70,7 @@ async def test_policy_qa_answers_from_the_policy_and_cites_it() -> None:
     ]
     assert await audit_events() == [
         "question_asked",
+        "turn_read",
         "feature_routed",
         "tool_called",
         "answer_returned",
@@ -198,7 +199,11 @@ async def test_troubleshooting_walks_a_playbook_to_the_end() -> None:
         conversation_id = await client.conversation()
         steps = []
         for text in ("Card is blocked", "done", "expired", "done"):
-            events = await client.ask(conversation_id, text=text, feature_id="troubleshooting")
+            # After the first, answers clicked on the step card: not read by the model.
+            reply_as = None if text == "Card is blocked" else "answer"
+            events = await client.ask(
+                conversation_id, text=text, feature_id="troubleshooting", reply_as=reply_as
+            )
             steps += [data["step"]["order"] for name, data in events if name == "playbook_step"]
         last = answer(events)
 

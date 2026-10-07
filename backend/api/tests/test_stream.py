@@ -19,8 +19,9 @@ def calls(name: str, **arguments) -> ModelReply:
 
 async def test_a_turn_streams_every_event_in_order() -> None:
     await make_staff("ama")
-    # The reference is in the question, so the status lookup is made in code (prefetch) and
-    # the model only writes the answer, which streams once the turn has a source.
+    # The reference is in the question, so the status lookup is made in code (prefetch), then
+    # the failure code it points to is looked up in the documents (a second round), and the
+    # model only writes the answer, which streams once the turn has a source.
     async with api(ModelReply("It failed: beneficiary account closed.")) as client:
         await client.login("ama")
         events = await client.ask(
@@ -30,9 +31,10 @@ async def test_a_turn_streams_every_event_in_order() -> None:
         )
 
     names = [name for name, _ in events]
-    assert names[:3] == ["feature_selected", "tool_started", "tool_finished"]
+    assert names[:5] == ["feature_selected", *["tool_started", "tool_finished"] * 2]
+    assert events[3][1]["call"]["name"] == "documents.search"  # the code E51, explained
     assert names[-1] == "completed"
-    assert set(names[3:-1]) == {"text_delta"} and len(names[3:-1]) > 1  # streamed in pieces
+    assert set(names[5:-1]) == {"text_delta"} and len(names[5:-1]) > 1  # streamed in pieces
     streamed = "".join(data["text"] for name, data in events if name == "text_delta")
     assert streamed == "It failed: beneficiary account closed."
     assert events[1][1]["label"] == "the transfer"  # in staff's words, from the pack
@@ -172,3 +174,48 @@ async def test_disconnect_cancels_generation_and_frees_the_slot() -> None:
     await stream.aclose()  # what the server does when the client goes away
     await asyncio.wait_for(cancelled.wait(), 1)
     assert not queue.busy
+
+
+async def test_a_procedure_reads_replies_pauses_for_questions_and_stops_when_asked() -> None:
+    await make_staff("ama")
+    await sync_to_async(call_command)("load_pack_playbooks")
+    replies = [
+        ModelReply("troubleshooting"),  # routing
+        ModelReply("blocked_card"),  # which procedure
+        ModelReply("done"),  # "done" read as the step's answer
+        ModelReply("hmm"),  # "blue" cannot be read...
+        ModelReply("hmm"),  # ...even asked again
+        ModelReply("It failed: beneficiary account closed."),
+    ]
+    async with api(*replies) as client:
+        await client.login("ama")
+        conversation = await client.conversation()
+        procedure = f"/api/conversations/{conversation}/procedure"
+        await client.ask(conversation, text="The card is blocked")
+        await client.ask(conversation, text="done")
+        assert (await client.http.get(procedure)).json()["step_order"] == 2
+
+        unclear = await client.ask(conversation, text="blue")
+        assert (
+            "reply_unclear",
+            {"step_order": 2, "step_title": "Find the block reason"},
+        ) in unclear
+
+        await client.ask(
+            conversation,
+            text="Why did TX-0002 fail?",
+            feature_id="transaction_lookup",
+            reply_as="question",
+        )
+        waiting = (await client.http.get(procedure)).json()
+        assert waiting == {
+            "playbook_id": "blocked_card",
+            "playbook_title": "Blocked card",
+            "step_order": 2,
+            "step_title": "Find the block reason",
+            "paused": True,
+        }
+
+        stopped = await client.ask(conversation, text="Stop the procedure", reply_as="stop")
+        assert ("text_delta", {"text": "Stopped the Blocked card procedure."}) in stopped
+        assert (await client.http.get(procedure)).json() is None

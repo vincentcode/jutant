@@ -14,6 +14,7 @@ from core.types import (
     Answer,
     Caller,
     Citation,
+    EntityType,
     Feature,
     Playbook,
     PlaybookStep,
@@ -142,6 +143,7 @@ async def make_rig(
     playbooks: list[Playbook] | None = None,
     max_steps: int = 4,
     extraction_schemas: dict[str, list[str]] | None = None,
+    entity_types: tuple[EntityType, ...] = (),
 ) -> Rig:
     model = model or FakeModel()
     tools = FakeToolClient(
@@ -165,6 +167,7 @@ async def make_rig(
         max_steps=max_steps,
         system_prompt="You help bank staff.",
         extraction_schemas=extraction_schemas,
+        entity_types=entity_types,
     )
     await orchestrator.load_tools()
     return Rig(orchestrator, model, tools, conversations, store, audit)

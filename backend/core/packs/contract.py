@@ -54,11 +54,15 @@ def check(pack: Pack, tool_specs: list[ToolSpec]) -> list[str]:
             if (error := _regex_problem(pattern)) is not None:
                 problems.append(f"feature {f.id}: route pattern {pattern!r}: {error}")
         for p in f.prefetch:
-            problems.extend(_prefetch_problems(f.id, f.tools, p, specs))
+            problems.extend(_prefetch_problems(f.id, f.tools, p, specs, set(m.entities)))
         if f.ask_for and not f.prefetch:
             problems.append(f"feature {f.id}: ask_for needs prefetch calls to ask for")
         if f.follow_ups and f.follow_ups not in feature_ids:
             problems.append(f"feature {f.id}: follow_ups names unknown feature {f.follow_ups}")
+
+    for name, entity in m.entities.items():
+        if (error := _regex_problem(entity.pattern, 1)) is not None:
+            problems.append(f"entity {name}: pattern {entity.pattern!r}: {error}")
 
     for tool in sorted(tools - ruled):
         problems.append(f"tool {tool} has no access rule")
@@ -182,7 +186,11 @@ def _regex_problem(pattern: str, max_groups: int | None = None) -> str | None:
 
 
 def _prefetch_problems(
-    feature_id: str, feature_tools: list[str], p: PrefetchDef, specs: dict[str, ToolSpec]
+    feature_id: str,
+    feature_tools: list[str],
+    p: PrefetchDef,
+    specs: dict[str, ToolSpec],
+    entities: set[str] | None = None,
 ) -> list[str]:
     where = f"feature {feature_id}: prefetch {p.tool}"
     if p.tool not in feature_tools:
@@ -194,6 +202,8 @@ def _prefetch_problems(
             problems.append(f"{where}: the tool takes no argument {name}")
         if argument.match is not None and (error := _regex_problem(argument.match, 1)):
             problems.append(f"{where}: argument {name}: {error}")
+        if argument.entity and argument.entity not in (entities or set()):
+            problems.append(f"{where}: argument {name}: unknown entity {argument.entity}")
     return problems
 
 

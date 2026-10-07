@@ -11,25 +11,22 @@ nothing else is sure:
 4. The model chooses from `id: description` lines; only an exact id is accepted.
 5. Keyword scoring against the descriptions, then the pack's default feature.
 
-A preferred feature changes this. Another feature's pattern (and not the preferred one's)
-still decides. Then:
+Staff's quick action (`prefer`) changes this. Another feature's pattern (and not the preferred
+one's) still decides. Otherwise the quick action, which may be left over from an earlier
+question, is kept if its meaning is the closest or near it; if another feature is clearly closer,
+the question is routed as usual, from the meaning step, and the model may still choose it. (The
+embedding model scores most features between 0.7 and 0.8 for any banking question, so requiring
+another feature to be clearly similar enough would almost never leave a quick action.)
 
-- Staff's quick action (`prefer`) may be left over from an earlier question. It is kept if its
-  meaning is the closest or near it; if another feature is clearly closer, the question is routed
-  as usual, from the meaning step, and the model may still choose the quick action.
-- A follow-up's feature (`continuing`) is about the same thing by construction. It is kept unless
-  another feature's meaning is clearly ahead: similar enough, and by the margin. The model is not
-  asked.
-
-The embedding model scores most features between 0.7 and 0.8 for any banking question, so
-"clearly ahead" is rare: on its own, the stricter rule would almost never leave a quick action.
+The router decides only a new subject's feature: which subject a turn is about is the
+conversation context's to decide (`core.context`).
 
 The step that decided is recorded in the audit log, so a shortcut that misroutes can be found.
 """
 
 import math
 import re
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -79,19 +76,19 @@ class FeatureRouter:
         text: str,
         model: ModelProvider | None = None,
         prefer: str | None = None,
-        continuing: str | None = None,
+        exclude: Collection[str] = (),
     ) -> Route:
         """`model` stands in for the router's own for this question (a traced one, say).
-        `prefer`: staff's quick action; `continuing`: for a follow-up, the feature that answered
-        last. A feature the role may not use is ignored."""
+        `prefer`: staff's quick action. A feature the role may not use is ignored. `exclude`:
+        features this turn may not start (another procedure while one is open)."""
         model = model or self.model
-        available = self.registry.for_role(caller.role)
+        available = [f for f in self.registry.for_role(caller.role) if f.id not in exclude]
         if not available:
             raise LookupError(f"No features for role {caller.role}")
         if len(available) == 1:
             return Route(available[0], "only")
         by_id = {f.id: f for f in available}
-        preferred = by_id.get(prefer or continuing or "")
+        preferred = by_id.get(prefer or "")
         matched = self._matching(text, available)
         if preferred is not None and preferred in matched:
             return Route(preferred, "preferred")
@@ -102,10 +99,8 @@ class FeatureRouter:
         if preferred is not None:
             own = next((score for score, f in scored if f is preferred), 0.0)
             best = scored[0][0] if scored else 0.0
-            if prefer is not None and best - own < self.min_margin:
+            if best - own < self.min_margin:
                 return Route(preferred, "preferred")  # the quick action is (nearly) the closest
-            if prefer is None and not self._clear(scored, own):
-                return Route(preferred, "preferred")  # a follow-up stays unless clearly elsewhere
         if (route := self._by_meaning(scored)) is not None:
             return route
         options = [Option(f.id, f.description) for f in available]

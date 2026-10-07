@@ -232,6 +232,7 @@ async def test_audit_trail_for_a_turn() -> None:
 
     assert rig.audit.names() == [
         "question_asked",
+        "turn_read",  # a first message: a new subject
         "feature_routed",
         "tool_called",
         "answer_returned",

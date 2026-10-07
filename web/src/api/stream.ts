@@ -4,10 +4,16 @@
 import { API_BASE, ApiError } from './client'
 import type { StreamEvent } from './events'
 
+/** A step answer clicked on its card, staff's reply to "your answer or a new question?", a
+ * paused procedure's Resume and Stop, or a subject chip clicked to return to it. */
+export type ReplyAs = 'answer' | 'question' | 'resume' | 'stop' | 'return' | 'continue'
+
 export interface AskBody {
   text: string
   feature_id?: string // used whatever the question
   preferred_feature_id?: string // staff's quick action: used unless the question is clearly for another
+  reply_as?: ReplyAs // during a procedure: what staff say the message is, so it is not read
+  subject_id?: number // with reply_as 'return' or 'continue': the subject staff chose
   upload_id?: string
 }
 
