@@ -14,7 +14,15 @@ import yaml
 
 from core.packs.manifest import PackManifest
 from core.policy.rules import FieldRule, Rule
-from core.types import ArgumentSource, Feature, Playbook, PlaybookStep, Prefetch, StepLookup
+from core.types import (
+    ArgumentSource,
+    EntityType,
+    Feature,
+    Playbook,
+    PlaybookStep,
+    Prefetch,
+    StepLookup,
+)
 
 SYSTEM_PROMPT = "prompts/system.md"
 
@@ -29,6 +37,13 @@ class Pack:
     rules: tuple[Rule, ...]
     field_rules: tuple[FieldRule, ...]
     eval_questions: tuple[dict[str, Any], ...] = ()
+
+    @property
+    def entity_types(self) -> tuple[EntityType, ...]:
+        return tuple(
+            EntityType(name, e.pattern, tuple(e.words), e.name_field)
+            for name, e in self.manifest.entities.items()
+        )
 
     @property
     def extraction_schemas(self) -> dict[str, list[str]]:
@@ -62,7 +77,7 @@ def load_pack(path: str | Path) -> Pack:
                 Prefetch(
                     p.tool,
                     {
-                        name: ArgumentSource(a.question, a.match, a.value)
+                        name: ArgumentSource(a.question, a.match, a.value, a.entity)
                         for name, a in p.arguments.items()
                     },
                 )

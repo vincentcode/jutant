@@ -32,12 +32,22 @@ class ArgumentDef(BaseModel):
     question: bool = False
     match: str | None = None
     value: Any = None
+    entity: str | None = None  # an entity type the pack declares: the conversation's current one
 
     @model_validator(mode="after")
     def _exactly_one(self) -> "ArgumentDef":
-        if sum((self.question, self.match is not None, self.value is not None)) != 1:
-            raise ValueError("set exactly one of question, match or value")
+        given = (self.question, self.match is not None, self.value is not None, self.entity)
+        if sum(bool(g) for g in given) != 1:
+            raise ValueError("set exactly one of question, match, value or entity")
         return self
+
+
+class EntityDef(BaseModel):
+    """A kind of thing staff talk about: how to recognise its id, and what staff call it."""
+
+    pattern: str
+    words: list[str] = []
+    name_field: str | None = None  # in tool results, the field holding one's name
 
 
 class PrefetchDef(BaseModel):
@@ -118,4 +128,7 @@ class PackManifest(BaseModel):
     # "Checking the account's transactions…", "Not allowed: the account's transactions".
     tool_labels: dict[str, str] = {}
     home: HomeDef = HomeDef()  # the client's home screen
+    # What staff talk about, by type: the conversation keeps the current one of each, so a
+    # follow-up's lookups use it ("why did it fail?" after TX-0002).
+    entities: dict[str, EntityDef] = {}
     policy: str  # dotted path to a module exposing RULES

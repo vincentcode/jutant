@@ -23,6 +23,7 @@ class EvalQuestion:
     attributes: dict[str, Any] = field(default_factory=dict)
     expect_tool: str | None = None
     expect_contains: tuple[str, ...] = ()
+    expect_absent: tuple[str, ...] = ()  # phrases a correct answer must not state (an invention)
     expect_citation: bool = False
     expect_denied: bool = False
     before: tuple[str, ...] = ()  # asked first in the same conversation, unscored: a follow-up
@@ -38,6 +39,7 @@ class EvalQuestion:
             attributes=dict(data.get("attributes") or {}),
             expect_tool=data.get("expect_tool"),
             expect_contains=tuple(data.get("expect_contains") or ()),
+            expect_absent=tuple(data.get("expect_absent") or ()),
             expect_citation=bool(data.get("expect_citation")),
             expect_denied=bool(data.get("expect_denied")),
             before=tuple(str(b) for b in data.get("before") or ()),
@@ -76,6 +78,9 @@ def score(result: QuestionResult) -> QuestionResult:
         if q.expect_contains:
             text = result.answer.lower()
             checks["contains"] = all(phrase.lower() in text for phrase in q.expect_contains)
+        if q.expect_absent:
+            text = result.answer.lower()
+            checks["no_invention"] = not any(phrase.lower() in text for phrase in q.expect_absent)
         if q.expect_citation:
             checks["cited"] = result.citations > 0
     result.checks = checks

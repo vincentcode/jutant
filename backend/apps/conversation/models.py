@@ -7,6 +7,8 @@ class Conversation(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     staff_id = models.CharField(max_length=64, db_index=True)  # the caller's staff number
     title = models.CharField(max_length=200, blank=True)
+    # What staff are talking about: the stack of subjects (core.context), kept between turns.
+    context = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

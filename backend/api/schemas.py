@@ -129,7 +129,33 @@ class AskRequest(BaseModel):
     # Staff's quick action: used unless the question clearly belongs to another feature. One the
     # role may not use is ignored.
     preferred_feature_id: str | None = Field(default=None, max_length=64)
+    # During a procedure, what staff say the message is, so it is not read by the model: an
+    # answer clicked on the step card, the reply to "your answer or a new question?", or the
+    # paused procedure's Resume and Stop.
+    reply_as: Literal["answer", "question", "resume", "stop", "return", "continue"] | None = None
+    # With reply_as "return": the subject chip staff clicked. With "continue": the subject staff
+    # said the message is about, answering "is this about X, or something new?".
+    subject_id: int | None = None
     upload_id: UUID | None = None
+
+
+class SubjectOut(BaseModel):
+    """One subject open in a conversation, for staff to return to with a click."""
+
+    id: int
+    title: str  # "Transaction lookup: transfer TX-0002"
+    procedure: bool
+    current: bool  # the one the conversation is on
+
+
+class ProcedureOut(BaseModel):
+    """The procedure in progress in a conversation, and the step it waits on."""
+
+    playbook_id: str
+    playbook_title: str
+    step_order: int
+    step_title: str
+    paused: bool
 
 
 class UploadOut(BaseModel):

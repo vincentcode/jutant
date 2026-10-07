@@ -76,6 +76,7 @@ async def test_document_answer_is_stored_with_citations_and_audited() -> None:
     )
     assert [e.event for e in events] == [
         "question_asked",
+        "turn_read",
         "feature_routed",
         "tool_called",
         "answer_returned",
@@ -91,8 +92,12 @@ async def test_playbook_run_survives_between_turns() -> None:
     first = await collect_events(
         orchestrator.ask(teller(), conversation_id, "card blocked", "troubleshooting")
     )
-    second = await collect_events(orchestrator.ask(teller(), conversation_id, "done"))
-    third = await collect_events(orchestrator.ask(teller(), conversation_id, "wrong pin"))
+    second = await collect_events(
+        orchestrator.ask(teller(), conversation_id, "done", reply_as="answer")
+    )
+    third = await collect_events(
+        orchestrator.ask(teller(), conversation_id, "wrong pin", reply_as="answer")
+    )
 
     def orders(events):
         return [e.step.order for e in events if isinstance(e, PlaybookStepShown)]

@@ -23,6 +23,8 @@ from core.events import (
     Failed,
     FeatureSelected,
     PlaybookStepShown,
+    ReplyUnclear,
+    SubjectUnclear,
     TextDelta,
     ToolFinished,
     ToolStarted,
@@ -88,6 +90,12 @@ def to_frame(event: Event, labels: Mapping[str, str] | None = None) -> str:
             )
         case Failed(reason):
             return frame("failed", {"reason": reason})
+        case ReplyUnclear(step_order, step_title):
+            return frame("reply_unclear", {"step_order": step_order, "step_title": step_title})
+        case SubjectUnclear(subject_id, subject_title):
+            return frame(
+                "subject_unclear", {"subject_id": subject_id, "subject_title": subject_title}
+            )
     raise TypeError(f"unknown event {event!r}")
 
 

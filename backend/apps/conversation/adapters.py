@@ -175,6 +175,12 @@ class DjangoConversationStore:
         )
         return upload.id
 
+    async def context(self, conversation_id: UUID) -> dict[str, Any]:
+        return await sync_to_async(selectors.context)(conversation_id=conversation_id)
+
+    async def save_context(self, conversation_id: UUID, context: dict[str, Any]) -> None:
+        await sync_to_async(services.save_context)(conversation_id=conversation_id, context=context)
+
     async def upload_text(self, upload_id: UUID, conversation_id: UUID) -> str | None:
         upload = await sync_to_async(selectors.get_upload)(
             upload_id=upload_id, conversation_id=conversation_id
@@ -195,6 +201,7 @@ def to_message(row: MessageRow) -> Message:
         tool_calls=tuple(ToolCall(**c) for c in row.tool_calls),
         created_at=row.created_at,
         feature_id=row.feature_id or None,
+        citations=to_citations(row),
     )
 
 

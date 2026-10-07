@@ -49,6 +49,24 @@ class Failed:
     reason: str
 
 
+@dataclass(frozen=True)
+class SubjectUnclear:
+    """The message could be about an open subject or another of the same kind, and the model
+    could not tell: the client asks staff, and sends it again saying which."""
+
+    subject_id: int
+    subject_title: str
+
+
+@dataclass(frozen=True)
+class ReplyUnclear:
+    """A message typed during a procedure could not be read as an answer or a new question:
+    the client asks staff which they meant, and sends it again saying so."""
+
+    step_order: int
+    step_title: str
+
+
 Event = (
     FeatureSelected
     | ToolStarted
@@ -57,4 +75,6 @@ Event = (
     | PlaybookStepShown
     | Completed
     | Failed
+    | ReplyUnclear
+    | SubjectUnclear
 )

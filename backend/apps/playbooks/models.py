@@ -59,4 +59,5 @@ class PlaybookRun(models.Model):
     facts = models.JSONField(default=dict, blank=True)  # step order -> the record it looked up
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.ACTIVE)
     feature_id = models.CharField(max_length=64, blank=True)  # the feature that started the run
+    paused = models.BooleanField(default=False)  # staff asked something else; resumed on its step
     created_at = models.DateTimeField(auto_now_add=True)

@@ -121,6 +121,7 @@ def build_runtime(
         extraction_schemas=pack.extraction_schemas,
         tracer=tracing.build(settings),
         trace_content=TraceContent(include=settings.JUTANT_TRACE_CONTENT),
+        entity_types=pack.entity_types,
     )
     return Runtime(
         feedback=tracing.feedback_sink(settings),

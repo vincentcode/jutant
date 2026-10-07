@@ -2,7 +2,7 @@ from uuid import uuid4
 
 from core.events import Completed, PlaybookStepShown, TextDelta
 from core.playbooks.filtering import steps_for
-from core.playbooks.runner import FINISHED, STOPPED
+from core.playbooks.runner import FINISHED
 from core.types import Caller, ModelReply
 from providers.llm.fake import FakeModel
 from tests.builders import BLOCKED_CARD, collect_events, make_rig, teller
@@ -35,10 +35,14 @@ async def test_playbook_starts_and_branches_by_choice() -> None:
     assert shown(first) == [1]
     assert isinstance(first[-1], Completed)
 
-    second = await collect_events(rig.orchestrator.ask(teller(), conversation_id, "done"))
+    second = await collect_events(
+        rig.orchestrator.ask(teller(), conversation_id, "done", reply_as="answer")
+    )
     assert shown(second) == [2]
 
-    third = await collect_events(rig.orchestrator.ask(teller(), conversation_id, "fraud hold"))
+    third = await collect_events(
+        rig.orchestrator.ask(teller(), conversation_id, "fraud hold", reply_as="answer")
+    )
     assert shown(third) == [4]  # next_on: fraud_hold -> 4, skipping 3
 
     run = rig.playbooks.runs[conversation_id]
@@ -50,10 +54,14 @@ async def test_none_steps_are_shown_and_the_run_completes() -> None:
     rig = await make_rig(FakeModel())
     conversation_id = uuid4()
     await start_blocked_card(rig, conversation_id)
-    await collect_events(rig.orchestrator.ask(teller(), conversation_id, "yes"))
-    await collect_events(rig.orchestrator.ask(teller(), conversation_id, "wrong_pin"))
+    await collect_events(rig.orchestrator.ask(teller(), conversation_id, "yes", reply_as="answer"))
+    await collect_events(
+        rig.orchestrator.ask(teller(), conversation_id, "wrong_pin", reply_as="answer")
+    )
 
-    last = await collect_events(rig.orchestrator.ask(teller(), conversation_id, "done"))
+    last = await collect_events(
+        rig.orchestrator.ask(teller(), conversation_id, "done", reply_as="answer")
+    )
 
     assert shown(last) == [5]  # step 3 -> next_on confirm -> 5, a "none" step
     assert texts(last) == [FINISHED]
@@ -65,7 +73,9 @@ async def test_unrecognised_reply_repeats_the_step() -> None:
     conversation_id = uuid4()
     await start_blocked_card(rig, conversation_id)
 
-    events = await collect_events(rig.orchestrator.ask(teller(), conversation_id, "hmm"))
+    events = await collect_events(
+        rig.orchestrator.ask(teller(), conversation_id, "hmm", reply_as="answer")
+    )
 
     assert shown(events) == [1]
     assert "done" in texts(events)[0]
@@ -75,10 +85,12 @@ async def test_free_text_choice_is_mapped_by_the_model() -> None:
     rig = await make_rig(FakeModel(replies=[ModelReply("wrong_pin")]))
     conversation_id = uuid4()
     await start_blocked_card(rig, conversation_id)
-    await collect_events(rig.orchestrator.ask(teller(), conversation_id, "done"))
+    await collect_events(rig.orchestrator.ask(teller(), conversation_id, "done", reply_as="answer"))
 
     events = await collect_events(
-        rig.orchestrator.ask(teller(), conversation_id, "they typed the code wrong three times")
+        rig.orchestrator.ask(
+            teller(), conversation_id, "they typed the code wrong three times", reply_as="answer"
+        )
     )
 
     assert shown(events) == [3]
@@ -89,13 +101,15 @@ async def test_cancel_abandons_the_run_and_frees_the_conversation() -> None:
     conversation_id = uuid4()
     await start_blocked_card(rig, conversation_id)
 
-    events = await collect_events(rig.orchestrator.ask(teller(), conversation_id, "Cancel"))
+    events = await collect_events(
+        rig.orchestrator.ask(teller(), conversation_id, "Cancel", reply_as="answer")
+    )
 
-    assert texts(events) == [STOPPED]
+    assert texts(events) == ["Stopped the Blocked card procedure."]
     assert await rig.playbooks.get_run(conversation_id) is None
 
 
-async def test_choosing_another_feature_leaves_the_playbook() -> None:
+async def test_choosing_another_feature_pauses_the_playbook() -> None:
     model = FakeModel(replies=[ModelReply("From the policy."), ModelReply("unused")])
     rig = await make_rig(model)
     conversation_id = uuid4()
@@ -106,12 +120,12 @@ async def test_choosing_another_feature_leaves_the_playbook() -> None:
     )
 
     assert shown(events) == []  # answered by the chosen feature, not the playbook
-    assert rig.playbooks.runs[conversation_id].status == "abandoned"
-    assert "playbook_step" in rig.audit.names()
+    run = rig.playbooks.runs[conversation_id]
+    assert run.status == "active" and run.paused  # waiting on its step, not ended
 
 
 async def test_the_same_feature_keeps_the_playbook_going() -> None:
-    rig = await make_rig(FakeModel())
+    rig = await make_rig(FakeModel(replies=[ModelReply("done")]))  # read as the answer
     conversation_id = uuid4()
     await start_blocked_card(rig, conversation_id)
     events = await collect_events(

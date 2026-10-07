@@ -99,7 +99,7 @@ features:
         - "What rate does the youth savings product pay?"
     prefetch:
       - tool: services.get_product
-        arguments: {product_code: {match: '\b([A-Z]{3}-[A-Z]{3})\b'}}
+        arguments: {product_code: {entity: product}}
   - id: transaction_lookup
     template: record_lookup
     title: Transaction lookup
@@ -107,7 +107,10 @@ features:
     description: "One account's transactions, or one transfer by its reference: activity, status, why it failed."
     ask_for: "Which transfer or account? Give me the transfer reference (for example TX-0002) or the 10-digit account number."
     prompt: prompts/transaction_lookup.md
-    tools: [transactions.list, transactions.get_status]
+    # documents.search: a failed transfer's code is looked up in the error-code reference (a
+    # second prefetch round, from the record's failure_code), so "when does the money come
+    # back?" is answered from the record and the reference together.
+    tools: [transactions.list, transactions.get_status, documents.search]
     route:
       patterns: ['(?i)\bTX-\d+\b', '\b\d{10}\b']
       examples:
@@ -116,9 +119,11 @@ features:
         - "List the recent debits on the customer's account."
     prefetch:
       - tool: transactions.get_status
-        arguments: {reference: {match: '(?i)\b(TX-\d+)\b'}}
+        arguments: {reference: {entity: transfer}}
       - tool: transactions.list
-        arguments: {account_number: {match: '\b(\d{10})\b'}}
+        arguments: {account_number: {entity: account}}
+      - tool: documents.search
+        arguments: {query: {entity: error_code}}
   - id: code_explainer
     template: document_qa
     title: Error and status code explainer
@@ -133,7 +138,7 @@ features:
         - "What should I do when the system shows insufficient funds?"
     prefetch:
       - tool: documents.search
-        arguments: {query: {match: '\b([A-Z]\d{2,3})\b'}}
+        arguments: {query: {entity: error_code}}
   - id: form_guidance
     template: checklist
     title: Form and checklist guidance
@@ -192,7 +197,18 @@ features:
         - "What accounts and open requests does the customer have?"
     prefetch:
       - tool: services.customer_summary
-        arguments: {customer_number: {match: '(?i)\b(C\d{4,})\b'}}
+        arguments: {customer_number: {entity: customer}}
+
+# What staff talk about. The conversation keeps the current one of each type for every subject,
+# so lookups use it without it being repeated ("why did it fail?" after TX-0002), and a message
+# naming one returns to the subject about it. Found in messages, tool arguments and sources.
+entities:
+  transfer: {pattern: '(?i)\b(TX-\d+)\b', words: [transfer, transaction, payment]}
+  account: {pattern: '\b(\d{10})\b', words: [account]}
+  # name_field: tool results naming one teach the conversation its name ("Standard Savings").
+  customer: {pattern: '(?i)\b(C\d{4,})\b', words: [customer], name_field: name}
+  product: {pattern: '\b([A-Z]{3}-[A-Z]{3})\b', words: [product], name_field: name}
+  error_code: {pattern: '\b([A-Z]\d{2,3})\b', words: [code, error]}
 
 extraction_schemas:
   - {type: id_card, fields: [full_name, id_number, date_of_birth, expiry_date]}

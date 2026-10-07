@@ -1,29 +1,44 @@
 """Orchestrator.ask(): one question in, a stream of events out.
 
 1. Audit the question.
-2. If a playbook is in progress in this conversation, the reply goes to the playbook runner,
-   unless staff picked a different feature, which ends the playbook.
-3. Otherwise resolve the feature: the one staff picked, or the router's choice. Staff's quick
-   action is kept unless another feature is clearly closer; for a follow-up, the feature that
-   answered last is kept unless the question clearly belongs elsewhere (see the router). Check
-   the caller's role may use it.
-4. Run the feature's template (for most features, the tool loop). A follow-up's lookups read
-   the previous question too. If the question gives nothing the feature's lookups need (no
-   reference, no customer number), the feature's `ask_for` question is the answer instead.
+2. Read the turn against the conversation's context (`core.context`): a stack of subjects, each
+   with its entities (TX-0002), its feature and, for a procedure, its run. The message continues
+   a subject, returns to an earlier one, starts a new one, or stops the procedure. Certain cases
+   need no model (a step answer clicked on its card, a locked feature, a message naming an
+   entity); the rest is read by the model with the stack in view. If it cannot tell during a
+   procedure, staff are asked which they meant.
+3. A procedure's turn goes to the playbook runner: the step's answer, or its step shown again.
+4. Otherwise answer with the subject's feature (for a new subject: the one staff locked, or the
+   router's choice, given staff's quick action). Check the caller's role may use it. Run its
+   template with the subject's entities, so lookups use them ("why did it fail?" after TX-0002),
+   and its own last few exchanges as history. If the subject lacks what the feature's lookups
+   need, the feature's `ask_for` question is the answer instead. A procedure below the top waits
+   (paused) until staff return to it.
 5. Collect citations from the tool results. A template that requires citations never returns an
    uncited answer: it is replaced with a fixed "no source found" message. Such answers are held
    back until this check is done, rather than streamed as they arrive.
-6. Store the answer, audit it with where the time went (routing, model, tools), and finish
-   with Completed (or Failed).
+6. Store the answer, keep what the turn looked at in its subject, audit it with where the time
+   went (routing, model, tools), and finish with Completed (or Failed).
 
-The turn is traced through the `Tracer` port, if one is given: a span for the turn, routing,
-each model and tool call, and each playbook step shown.
+The turn is traced through the `Tracer` port, if one is given: a span for the turn, reading it,
+routing, each model and tool call, and each playbook step shown.
 """
 
 import time
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Mapping, Sequence
+from dataclasses import replace
 from uuid import UUID
 
+from core.context import (
+    DOCUMENT,
+    ContextStack,
+    Frame,
+    entities_in,
+    from_calls,
+    names_in,
+    values_in,
+)
+from core.context.reader import Reading, ReplyAs, certain, read, same_subject
 from core.errors import ModelUnavailable, PolicyDenied
 from core.events import (
     Completed,
@@ -31,11 +46,12 @@ from core.events import (
     Failed,
     FeatureSelected,
     PlaybookStepShown,
+    ReplyUnclear,
+    SubjectUnclear,
     TextDelta,
     ToolFinished,
     ToolStarted,
 )
-from core.features.followup import is_follow_up, lookup_text, previous
 from core.features.prefetch import planned_calls
 from core.features.registry import FeatureRegistry
 from core.features.router import FeatureRouter
@@ -48,13 +64,24 @@ from core.orchestrator.timing import TimedModel, TurnTimer
 from core.playbooks.runner import Lookup, PlaybookRunner
 from core.ports import AuditSink, ConversationStore, ModelProvider, PlaybookStore, ToolClient
 from core.tools.gateway import ToolGateway
-from core.types import Answer, Caller, Feature, Message, ToolCall, ToolResult
+from core.types import (
+    Answer,
+    Caller,
+    EntityType,
+    Feature,
+    Message,
+    ToolCall,
+    ToolResult,
+)
 
 NO_SOURCE_MESSAGE = (
     "I could not find a source for that, so I can't answer it reliably. "
     "Please check the relevant document or ask a colleague."
 )
 MODEL_UNAVAILABLE = "model_unavailable"
+UNCLEAR = "Is that your answer to step {order} ({title}), or a new question?"
+WHICH_SUBJECT = "Is this about {subject}, or something new?"
+PROCEDURE_TEMPLATE = "guided_playbook"
 
 
 class Orchestrator:
@@ -75,6 +102,7 @@ class Orchestrator:
         templates: Mapping[str, FeatureTemplate] = TEMPLATES,
         tracer: Tracer = NOOP,
         trace_content: TraceContent | None = None,
+        entity_types: Sequence[EntityType] = (),
     ):
         self.model = model
         self.tools = tools
@@ -91,6 +119,7 @@ class Orchestrator:
         self.templates = templates
         self.tracer = tracer
         self.trace_content = trace_content or TraceContent()
+        self.entity_types = tuple(entity_types)  # the pack's: what staff talk about
         self.runner = PlaybookRunner(playbooks, audit, model)
 
     async def load_tools(self) -> None:
@@ -105,13 +134,17 @@ class Orchestrator:
         feature_id: str | None = None,
         upload_text: str | None = None,
         preferred_feature_id: str | None = None,
+        reply_as: ReplyAs | None = None,
+        subject_id: int | None = None,
     ) -> AsyncIterator[Event]:
         """Answer one question, streaming events.
 
         `feature_id` is used whatever the question; `preferred_feature_id` only unless the
-        question clearly belongs to another feature.
+        question clearly belongs to another feature. `reply_as`: what staff say the message is,
+        during a procedure (a step answer clicked on its card, resume, stop...), or a subject
+        chip clicked (`return`, with its `subject_id`).
         Raises PolicyDenied before the first event if the caller may not use the feature.
-        The whole turn is one trace: routing, model and tool calls, playbook steps.
+        The whole turn is one trace: reading it, routing, model and tool calls, playbook steps.
         """
         root = Trace(self.tracer, self.trace_content)
         with root.span(
@@ -125,9 +158,23 @@ class Orchestrator:
             preferred=preferred_feature_id,
         ) as turn:
             async for event in self._ask(
-                caller, conversation_id, text, feature_id, upload_text, preferred_feature_id, turn
+                caller,
+                conversation_id,
+                text,
+                feature_id,
+                upload_text,
+                preferred_feature_id,
+                reply_as,
+                subject_id,
+                turn,
             ):
                 yield event
+
+    async def subjects(self, conversation_id: UUID) -> list[tuple[int, str, bool]]:
+        """The conversation's open subjects, top first: (id, title, is a procedure)."""
+        stack = ContextStack.from_dict(await self.conversations.context(conversation_id))
+        current = await self.runner.current(conversation_id)
+        return [(f.id, self._describe(f, current, stack), f.procedure) for f in stack.frames]
 
     async def _ask(
         self,
@@ -137,6 +184,8 @@ class Orchestrator:
         feature_id: str | None,
         upload_text: str | None,
         preferred_feature_id: str | None,
+        reply_as: ReplyAs | None,
+        subject_id: int | None,
         turn: Trace,
     ) -> AsyncIterator[Event]:
         timer = TurnTimer()
@@ -148,80 +197,426 @@ class Orchestrator:
                 "text": text,
                 "feature_id": feature_id,
                 "preferred_feature_id": preferred_feature_id,
+                "reply_as": reply_as,
             },
         )
-        run = await self.playbooks.get_run(conversation_id)
-        chosen = feature_id or preferred_feature_id
-        if run is not None and chosen and chosen != run.feature_id:
-            await self.runner.abandon(caller, conversation_id)  # staff moved on to something else
-            run = None
-        if run is not None:
-            await self.conversations.append(conversation_id, Message("user", text))
-            results: list[ToolResult] = []
-            lookup = self._lookup(caller, conversation_id, run.feature_id, turn, results)
-            events = self.runner.advance(caller, conversation_id, text, lookup)
-            turn.set(feature=run.feature_id, playbook=run.playbook_id)
-            async for event in self._finish(
+        stack = ContextStack.from_dict(await self.conversations.context(conversation_id))
+        stack.turn += 1
+        mentioned = entities_in(text, self.entity_types, stack.names)
+        top = stack.top
+        waiting = await self.runner.current(conversation_id) if top and top.procedure else None
+        step = waiting[1] if waiting else None
+        reading = certain(stack, text, mentioned, reply_as, feature_id, subject_id, step)
+        if reading is None:
+            reading = await self._read(caller, conversation_id, text, stack, turn, timer)
+            if reading is not None and not mentioned:
+                same_kind = self._same_kind(stack, reading)
+                if same_kind is not None:
+                    reading = await self._which_subject(
+                        text, stack, same_kind, reading, turn, timer
+                    )
+                    if reading is None:  # neither the model nor the rules can tell: ask staff
+                        subject = self._describe(same_kind, None, stack)
+                        question = WHICH_SUBJECT.format(subject=subject)
+                        yield TextDelta(question)
+                        yield SubjectUnclear(same_kind.id, subject)
+                        yield Completed(Answer(question, same_kind.feature_id, (), ()))
+                        return
+        if reading is None:  # the model could not tell
+            top = stack.top
+            if (
+                top is not None
+                and top.procedure
+                and (current := await self.runner.current(conversation_id))
+            ):
+                _, step = current
+                question = UNCLEAR.format(order=step.order, title=step.title)
+                yield TextDelta(question)
+                yield ReplyUnclear(step.order, step.title)
+                yield Completed(Answer(question, top.feature_id, (), ()))  # not kept: asked again
+                return
+            reading = Reading("new", by="unclear")
+        turn.set(context=reading.action, read_by=reading.by)
+        await self.audit.record(
+            caller,
+            "turn_read",
+            {
+                "conversation_id": str(conversation_id),
+                "action": reading.action,
+                "frame": reading.frame_id,
+                "feature_id": reading.feature_id,
+                "by": reading.by,
+            },
+        )
+
+        frame = stack.get(reading.frame_id) if reading.frame_id is not None else None
+        if frame is not None and not frame.procedure and reply_as == "return":
+            async for event in self._back_to(caller, conversation_id, text, stack, frame, timer):
+                yield event
+            return
+        if (
+            frame is not None
+            and frame.procedure
+            and reading.action in ("continue", "return", "stop")
+        ):
+            async for event in self._procedure_turn(
+                caller, conversation_id, text, stack, frame, reading, turn, timer
+            ):
+                yield event
+            return
+
+        step_context = await self._waiting_step(conversation_id, stack)
+        switched = None
+        if frame is not None:  # continue or return to a subject
+            frame = stack.bring_to_top(frame.id).with_entities(mentioned)
+            feature = self._feature(frame.feature_id)
+            if feature.follow_ups and feature.follow_ups != feature.id:
+                feature = self._feature(feature.follow_ups)  # a summary's follow-ups: Q&A
+                frame = replace(frame, feature_id=feature.id, procedure=False, touched=stack.turn)
+            stack.put(frame)
+            await self._audit_route(caller, conversation_id, feature, reading.by, turn)
+        else:  # a new subject
+            open_procedure = stack.procedure_frame()
+            feature = await self._resolve(
                 caller,
                 conversation_id,
-                run.feature_id,
-                events,
-                results=results,
-                timer=timer,
-                trace=turn,
-            ):
-                yield event
-            return
-
-        history = await self.conversations.recent_messages(conversation_id, self.history_limit)
-        before = previous(history)
-        continuing = self._continued(before.feature_id, text)
-        feature = await self._resolve(
-            caller, conversation_id, text, feature_id, turn, preferred_feature_id, continuing
-        )
+                text,
+                reading.feature_id,
+                turn,
+                preferred_feature_id,
+                chosen_by=reading.by if reading.feature_id and not feature_id else None,
+                # One procedure at a time: another starts only when staff lock it.
+                exclude=self._procedure_features() if open_procedure and not feature_id else (),
+            )
+            starts_procedure = feature.template == PROCEDURE_TEMPLATE
+            if starts_procedure and (open_procedure := stack.procedure_frame()) is not None:
+                async for event in self._stop_quietly(
+                    caller, conversation_id, stack, open_procedure
+                ):
+                    yield event
+                step_context = ""
+            inherited = {} if starts_procedure else self._case(stack, open_procedure, feature)
+            frame = stack.push(feature.id, {**inherited, **mentioned}, procedure=starts_procedure)
+            if preferred_feature_id not in (None, feature.id):
+                switched = preferred_feature_id
         timer.route_s = time.perf_counter() - timer.started
+        if (procedure := stack.procedure_frame()) is not None and procedure.id != frame.id:
+            await self.runner.pause(conversation_id)  # it waits below this subject
+
+        async for event in self._answer(
+            caller,
+            conversation_id,
+            text,
+            feature,
+            frame,
+            stack,
+            upload_text=upload_text,
+            switched=switched,
+            step_context=step_context,
+            turn=turn,
+            timer=timer,
+        ):
+            yield event
+
+    async def _read(
+        self,
+        caller: Caller,
+        conversation_id: UUID,
+        text: str,
+        stack: ContextStack,
+        turn: Trace,
+        timer: TurnTimer,
+    ) -> Reading | None:
+        """The model's reading of the turn, with the stack in view."""
+        top = stack.top
+        assert top is not None
+        current = await self.runner.current(conversation_id) if top.procedure else None
+        step = current[1] if current else None
+        descriptions = {f.id: self._describe(f, current, stack) for f in stack.frames}
+        features = self.registry.for_role(caller.role)
+        if stack.procedure_frame() is not None:  # one procedure at a time
+            features = [f for f in features if f.template != PROCEDURE_TEMPLATE]
+        with turn.span("read turn", "chain") as span:
+            reading = await read(
+                TimedModel(TracedModel(self.model, span), timer),
+                text,
+                stack,
+                lambda f: descriptions[f.id],
+                features,
+                step,
+            )
+            span.set(
+                action=reading.action if reading else "unclear",
+                frame=reading.frame_id if reading else None,
+                feature=reading.feature_id if reading else None,
+            )
+        return reading
+
+    async def _procedure_turn(
+        self,
+        caller: Caller,
+        conversation_id: UUID,
+        text: str,
+        stack: ContextStack,
+        frame: Frame,
+        reading: Reading,
+        turn: Trace,
+        timer: TurnTimer,
+    ) -> AsyncIterator[Event]:
+        """The procedure's turn: stop it, show its step again, or take the step's answer."""
+        results: list[ToolResult] = []
+        if reading.action == "stop":
+            events = self.runner.stop(caller, conversation_id)
+            stack.drop(frame.id)
+        else:
+            stack.bring_to_top(frame.id)
+            if reading.action == "return":
+                events = self.runner.resume(conversation_id)
+            else:
+                lookup = self._lookup(caller, conversation_id, frame.feature_id, turn, results)
+                events = self.runner.advance(caller, conversation_id, text, lookup, reading.choice)
         await self.conversations.append(conversation_id, Message("user", text))
-        switched = preferred_feature_id if preferred_feature_id not in (None, feature.id) else None
+        turn.set(feature=frame.feature_id)
+        answer = None
+        async for event in self._finish(
+            caller,
+            conversation_id,
+            frame.feature_id,
+            events,
+            results=results,
+            timer=timer,
+            trace=turn,
+        ):
+            if isinstance(event, Completed):
+                answer = event.answer
+            yield event
+        if await self.playbooks.get_run(conversation_id) is None:
+            stack.drop(frame.id)  # finished or stopped
+        elif answer is not None and (kept := stack.get(frame.id)) is not None:
+            looked_at = from_calls(answer.tool_calls, answer.citations, self.entity_types)
+            stack.put(
+                kept.with_entities(looked_at)
+                .with_related(_pointed_to(results, self.entity_types))
+                .with_exchange(text, answer.text)
+            )
+        await self.conversations.save_context(conversation_id, stack.as_dict())
+
+    async def _answer(
+        self,
+        caller: Caller,
+        conversation_id: UUID,
+        text: str,
+        feature: Feature,
+        frame: Frame,
+        stack: ContextStack,
+        *,
+        upload_text: str | None,
+        switched: str | None,
+        step_context: str,
+        turn: Trace,
+        timer: TurnTimer,
+    ) -> AsyncIterator[Event]:
+        """Answer the question with the subject's feature, then keep what it looked at."""
+        await self.conversations.append(conversation_id, Message("user", text))
         yield FeatureSelected(feature.id, switched)
 
-        lookup = lookup_text(text, before)
-        if not upload_text and _lacks_details(feature, lookup):
-            async for event in self._finish(
-                caller, conversation_id, feature.id, _say(feature.ask_for), timer=timer, trace=turn
-            ):
-                yield event
-            return
-
-        template = self.templates[feature.template]
-        ctx = FeatureContext(
-            caller=caller,
-            conversation_id=conversation_id,
-            feature=feature,
-            question=text,
-            lookup_text=lookup,
-            messages=build_messages(self.system_prompt, feature, history, text),
-            model=TimedModel(TracedModel(self.model, turn), timer),
-            gateway=self.gateway,
-            playbooks=self.playbooks,
-            runner=self.runner,
-            audit=self.audit,
-            max_steps=self.max_steps,
-            upload_text=upload_text,
-            extraction_schemas=self.extraction_schemas,
-            trace=turn,
+        search = "\n".join(
+            part for part in (text, frame.entities.get(DOCUMENT, ""), step_context) if part
         )
-        events = template.run(ctx)
+        entities = {k: v for k, v in frame.entities.items() if k != DOCUMENT}
+        answer: Answer | None = None
+        if not upload_text and _lacks_details(feature, text, entities):
+            events: AsyncIterator[Event] = _say(feature.ask_for)
+            requires_citation, results = False, []
+        else:
+            template = self.templates[feature.template]
+            history = [
+                message
+                for question, reply in frame.exchanges
+                for message in (Message("user", question), Message("assistant", reply))
+            ]
+            ctx = FeatureContext(
+                caller=caller,
+                conversation_id=conversation_id,
+                feature=feature,
+                question=text,
+                search_text=search,
+                entities=entities,
+                messages=build_messages(self.system_prompt, feature, history, text),
+                model=TimedModel(TracedModel(self.model, turn), timer),
+                gateway=self.gateway,
+                playbooks=self.playbooks,
+                runner=self.runner,
+                audit=self.audit,
+                max_steps=self.max_steps,
+                upload_text=upload_text,
+                extraction_schemas=self.extraction_schemas,
+                trace=turn,
+                entity_types=self.entity_types,
+            )
+            events = template.run(ctx)
+            requires_citation, results = template.requires_citation, ctx.results
         async for event in self._finish(
             caller,
             conversation_id,
             feature.id,
             events,
-            template.requires_citation,
-            ctx.results,
+            requires_citation,
+            results,
             timer,
             turn,
         ):
+            if isinstance(event, Completed):
+                answer = event.answer
             yield event
+
+        for result in results:
+            if result.ok:
+                stack.learn(names_in(result.data, self.entity_types))
+        kept = stack.get(frame.id) or frame
+        if answer is not None:
+            found = from_calls(answer.tool_calls, answer.citations, self.entity_types)
+            kept = (
+                kept.with_entities(found)
+                .with_related(_pointed_to(results, self.entity_types))
+                .with_exchange(text, answer.text)
+            )
+        if feature.template == PROCEDURE_TEMPLATE and await self.playbooks.get_run(conversation_id):
+            kept = replace(kept, procedure=True)
+        stack.put(kept)
+        await self.conversations.save_context(conversation_id, stack.as_dict())
+
+    async def _back_to(
+        self,
+        caller: Caller,
+        conversation_id: UUID,
+        text: str,
+        stack: ContextStack,
+        frame: Frame,
+        timer: TurnTimer,
+    ) -> AsyncIterator[Event]:
+        """Staff clicked a subject to return to it: it comes to the top, and the next question
+        is about it. No model, no lookup."""
+        frame = stack.bring_to_top(frame.id)
+        if (procedure := stack.procedure_frame()) is not None and procedure.id != frame.id:
+            await self.runner.pause(conversation_id)
+        await self.conversations.append(conversation_id, Message("user", text))
+        reply = f"Back to {self._describe(frame, None, stack)}. What would you like to know?"
+        async for event in self._finish(
+            caller, conversation_id, frame.feature_id, _say(reply), timer=timer
+        ):
+            yield event
+        await self.conversations.save_context(conversation_id, stack.as_dict())
+
+    async def _stop_quietly(
+        self, caller: Caller, conversation_id: UUID, stack: ContextStack, frame: Frame
+    ) -> AsyncIterator[Event]:
+        """Another procedure starts: the open one is stopped first, saying so."""
+        async for event in self.runner.stop(caller, conversation_id):
+            yield event
+        stack.drop(frame.id)
+
+    def _same_kind(self, stack: ContextStack, reading: Reading) -> Frame | None:
+        """The open subject a new subject's reading might really be about: the most recent one
+        with the feature the reading chose (not a procedure)."""
+        if reading.action != "new" or reading.feature_id is None:
+            return None
+        return next(
+            (f for f in stack.frames if not f.procedure and f.feature_id == reading.feature_id),
+            None,
+        )
+
+    async def _which_subject(
+        self,
+        text: str,
+        stack: ContextStack,
+        same_kind: Frame,
+        reading: Reading,
+        turn: Trace,
+        timer: TurnTimer,
+    ) -> Reading | None:
+        """Same subject, or another of its kind? A second, two-way question; None if unclear."""
+        subject = self._describe(same_kind, None, stack)
+        with turn.span("same subject?", "chain", subject=subject) as span:
+            same = await same_subject(
+                TimedModel(TracedModel(self.model, span), timer), text, subject
+            )
+            span.set(same=same)
+        if same is None:
+            return None
+        return Reading("continue", same_kind.id, by="model:same") if same else reading
+
+    def _procedure_features(self) -> tuple[str, ...]:
+        return tuple(f.id for f in self.registry if f.template == PROCEDURE_TEMPLATE)
+
+    def _case(
+        self, stack: ContextStack, procedure: Frame | None, feature: Feature
+    ) -> dict[str, str]:
+        """What a new subject takes from the case it comes out of: beside a procedure, the
+        procedure's; else the subject staff were on. Only for a different feature (another of
+        the same kind takes nothing, or one product's code would be looked up for the next),
+        and only the entity types the new feature's lookups use: "what does that code mean?"
+        after a failed transfer takes its failure code, nothing else."""
+        source = procedure or stack.top
+        if source is None or source.feature_id == feature.id:
+            return {}
+        wanted = {
+            argument.entity
+            for prefetch in feature.prefetch
+            for argument in prefetch.arguments.values()
+            if argument.entity
+        }
+        known = {**source.related, **source.entities}
+        return {kind: value for kind, value in known.items() if kind in wanted}
+
+    async def _waiting_step(self, conversation_id: UUID, stack: ContextStack) -> str:
+        """For a question asked beside a procedure: its step, for searches."""
+        if stack.procedure_frame() is None:
+            return ""
+        current = await self.runner.current(conversation_id)
+        return f"{current[1].title}: {current[1].instruction}" if current else ""
+
+    def _describe(
+        self, frame: Frame, current: tuple[str, object] | None, stack: ContextStack | None = None
+    ) -> str:
+        """A frame in a few words, for the model reading the turn and for staff's chips:
+        "Transaction lookup: transfer TX-0002", "Product lookup: Standard Savings (SAV-STD)"."""
+        if frame.procedure and current is not None:
+            title, step = current
+            return f"procedure {title}, waiting on step {step.order}: {step.title}"  # type: ignore[attr-defined]
+        about = []
+        for kind, value in frame.entities.items():
+            if kind == DOCUMENT:
+                about.append(value)
+                continue
+            name = stack.name_of(kind, value) if stack is not None else None
+            about.append(
+                f"{name.title()} ({value})" if name else f"{kind.replace('_', ' ')} {value}"
+            )
+        title = self._feature(frame.feature_id).title
+        return f"{title}{': ' + ', '.join(about) if about else ''}"
+
+    def _feature(self, feature_id: str) -> Feature:
+        try:
+            return self.registry.get(feature_id)
+        except KeyError:
+            raise PolicyDenied(f"unknown feature {feature_id}") from None
+
+    async def _audit_route(
+        self, caller: Caller, conversation_id: UUID, feature: Feature, by: str, turn: Trace
+    ) -> None:
+        if not feature.allows(caller.role):
+            raise PolicyDenied(f"role {caller.role} may not use {feature.id}")
+        await self.audit.record(
+            caller,
+            "feature_routed",
+            {
+                "conversation_id": str(conversation_id),
+                "chosen_by": f"context:{by}",
+                "feature_id": feature.id,
+            },
+        )
+        turn.set(feature=feature.id, routed_by=f"context:{by}")
 
     def _lookup(
         self,
@@ -247,20 +642,6 @@ class Orchestrator:
 
         return lookup
 
-    def _continued(self, feature_id: str | None, text: str) -> str | None:
-        """For a follow-up, the feature that answered last, or the one its pack sends follow-ups
-        to; none if its template does not carry on (a summary)."""
-        if feature_id is None or not is_follow_up(text):
-            return None
-        try:
-            feature = self.registry.get(feature_id)
-        except KeyError:
-            return None  # a feature the pack no longer has
-        if feature.follow_ups:
-            return feature.follow_ups
-        template = self.templates.get(feature.template)
-        return feature_id if getattr(template, "keeps_follow_ups", True) else None
-
     async def _resolve(
         self,
         caller: Caller,
@@ -269,8 +650,11 @@ class Orchestrator:
         feature_id: str | None,
         turn: Trace | None = None,
         prefer: str | None = None,
-        continuing: str | None = None,
+        chosen_by: str | None = None,
+        exclude: Sequence[str] = (),
     ) -> Feature:
+        """A new subject's feature: `feature_id` if given (staff locked it, or reading the turn
+        chose it: `chosen_by`), else the router's choice."""
         turn = turn or Trace()
         detail: dict[str, object] = {"conversation_id": str(conversation_id)}
         if feature_id:
@@ -278,12 +662,12 @@ class Orchestrator:
                 feature = self.registry.get(feature_id)
             except KeyError:
                 raise PolicyDenied(f"unknown feature {feature_id}") from None
-            detail["chosen_by"] = "client"
+            detail["chosen_by"] = f"context:{chosen_by}" if chosen_by else "client"
         else:
             with turn.span("route", "chain") as routing:
                 try:
                     route = await self.router.route(
-                        caller, text, TracedModel(self.model, routing), prefer, continuing
+                        caller, text, TracedModel(self.model, routing), prefer, exclude
                     )
                 except LookupError:
                     raise PolicyDenied(f"no features for role {caller.role}") from None
@@ -292,14 +676,11 @@ class Orchestrator:
                     routed_by=route.by,
                     score=route.score,
                     prefer=prefer,
-                    continuing=continuing,
                 )
             feature = route.feature
             detail["chosen_by"] = route.by  # pattern, meaning, model... to find misroutes
             if prefer:
                 detail["preferred"] = prefer
-            if continuing:
-                detail["continuing"] = continuing
             if route.score is not None:
                 detail["score"] = route.score
         if not feature.allows(caller.role):
@@ -423,13 +804,31 @@ class Orchestrator:
         )
 
 
-def _lacks_details(feature: Feature, text: str) -> bool:
-    """The feature asks for what its lookups need, and the question gives none of it."""
-    return bool(feature.ask_for and feature.prefetch and not planned_calls(feature, text))
+def _lacks_details(feature: Feature, text: str, entities: Mapping[str, str]) -> bool:
+    """The feature asks for what its lookups need, and neither the question nor the subject
+    gives any of it."""
+    return bool(feature.ask_for and feature.prefetch and not planned_calls(feature, text, entities))
+
+
+def _pointed_to(results: Sequence[ToolResult], types: Sequence[EntityType]) -> dict[str, str]:
+    """What a turn's records point to (exact ids in their values)."""
+    found: dict[str, str] = {}
+    for result in results:
+        if result.ok:
+            for kind, value in values_in(result.data, types).items():
+                found.setdefault(kind, value)
+    return found
 
 
 async def _say(text: str) -> AsyncIterator[Event]:
     yield TextDelta(text)
+
+
+async def _then(first: AsyncIterator[Event], second: AsyncIterator[Event]) -> AsyncIterator[Event]:
+    async for event in first:
+        yield event
+    async for event in second:
+        yield event
 
 
 def _timing(timer: TurnTimer) -> dict[str, int]:

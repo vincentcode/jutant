@@ -57,6 +57,7 @@ def save_run(
     status: str,
     feature_id: str = "",
     facts: dict[int, dict[str, Any]] | None = None,
+    paused: bool = False,
 ) -> PlaybookRun:
     """Update the conversation's active run, or start a new one.
 
@@ -73,5 +74,6 @@ def save_run(
     run.facts = {str(order): record for order, record in (facts or {}).items()}
     run.status = status
     run.feature_id = feature_id
+    run.paused = paused
     run.save()
     return run

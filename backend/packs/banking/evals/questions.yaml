@@ -307,3 +307,29 @@
   expect_tool: documents.search
   expect_contains: ["manager"]
   expect_citation: true
+
+# Answers come from the record only: TX-0002's record says nothing about a reversal, so the
+# answer must say the record does not show it, not invent one either way.
+
+- id: q35
+  feature: transaction_lookup
+  role: teller
+  attributes: {branch: ACC-01}
+  before: ["Why did transfer TX-0002 fail?"]
+  question: "Was it reversed to the sender?"
+  expect_tool: transactions.get_status
+  expect_contains: ["does not show"]
+  expect_absent: ["was not reversed", "has been reversed", "funds were returned"]
+  expect_citation: true
+
+- id: q36
+  feature: transaction_lookup
+  role: teller
+  attributes: {branch: ACC-01}
+  # The reference is two questions back: neither this question nor the last one names it.
+  before: ["Why did transfer TX-0002 fail?", "Was it reversed to the sender?"]
+  question: "Why was it not reversed to the sender?"
+  expect_tool: transactions.get_status
+  expect_contains: ["does not show"]
+  expect_absent: ["which transfer", "no longer active"]
+  expect_citation: true

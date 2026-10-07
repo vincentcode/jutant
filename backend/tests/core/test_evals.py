@@ -161,6 +161,7 @@ async def test_a_follow_up_is_asked_after_its_earlier_turns_with_the_quick_actio
             ModelReply("transaction_lookup"),  # routing the earlier turn
             ModelReply("It failed."),  # nudge: no tool call yet
             ModelReply("It failed."),
+            ModelReply("policy_qa"),  # reading the turn: a new subject, for policy Q&A
             ModelReply(None, (ToolCall("1", "documents.search", {"query": "joint"}),)),
             ModelReply("Each holder needs photo ID and proof of address."),
         ]
@@ -176,3 +177,15 @@ async def test_a_follow_up_is_asked_after_its_earlier_turns_with_the_quick_actio
 
     assert result.passed, result.checks
     assert result.tools_called == ["documents.search"]  # only the scored turn's calls
+
+
+def test_an_invented_fact_fails_the_answer() -> None:
+    question = EvalQuestion(
+        "q", "transaction_lookup", "teller", "Was it reversed?", expect_absent=("was not reversed",)
+    )
+    invented = score(QuestionResult(question, "transaction_lookup", answer="It was not reversed."))
+    honest = score(
+        QuestionResult(question, "transaction_lookup", answer="The record does not show.")
+    )
+    assert invented.checks["no_invention"] is False and not invented.passed
+    assert honest.checks["no_invention"] is True and honest.passed
