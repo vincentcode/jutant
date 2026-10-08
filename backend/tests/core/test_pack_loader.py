@@ -371,16 +371,10 @@ def test_tool_labels_must_name_offered_tools(pack_root: Path) -> None:
     assert found == ["tool_labels names records.nope, which no pack server offers"]
 
 
-def test_home_cards_and_quick_actions_must_start_real_features(pack_root: Path) -> None:
-    home = {
-        "cards": [{"title": "Look up", "description": "d", "feature": "nope"}],
-        "quick_actions": [{"label": "Q", "feature": "qa"}, {"label": "X", "feature": "missing"}],
-    }
+def test_home_cards_must_start_real_features(pack_root: Path) -> None:
+    home = {"cards": [{"title": "Look up", "description": "d", "feature": "nope"}]}
     found = violations(pack_root, manifest={**MANIFEST, "home": home})
-    assert found == [
-        "home card 'Look up': unknown feature nope",
-        "quick action 'X': unknown feature missing",
-    ]
+    assert found == ["home card 'Look up': unknown feature nope"]
 
 
 def test_ask_for_needs_prefetch_calls(pack_root: Path) -> None:

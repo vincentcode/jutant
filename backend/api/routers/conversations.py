@@ -21,7 +21,6 @@ from api.schemas import (
     FeedbackOut,
     MessageOut,
     ProcedureOut,
-    SubjectOut,
 )
 from api.sse import step_out
 from apps.conversation.adapters import Rating
@@ -78,21 +77,6 @@ async def delete(
     await runtime.orchestrator.audit.record(
         caller, "conversation_deleted", {"conversation_id": str(conversation_id)}
     )
-
-
-@router.get("/{conversation_id}/subjects")
-async def subjects(
-    conversation_id: UUID,
-    caller: Caller = Depends(get_caller),
-    runtime: Runtime = Depends(get_runtime),
-) -> list[SubjectOut]:
-    """The subjects open in the conversation, current first, for staff to return to."""
-    await _owned(runtime, conversation_id, caller)
-    open_ = await runtime.orchestrator.subjects(conversation_id)
-    return [
-        SubjectOut(id=id_, title=title, procedure=procedure, current=index == 0)
-        for index, (id_, title, procedure) in enumerate(open_)
-    ]
 
 
 @router.get("/{conversation_id}/procedure")

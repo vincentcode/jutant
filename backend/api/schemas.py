@@ -30,16 +30,10 @@ class HomeCardOut(BaseModel):
     label: str = ""
 
 
-class QuickActionOut(BaseModel):
-    label: str
-    feature_id: str
-
-
 class HomeOut(BaseModel):
-    """The home screen for the caller: only cards and actions for features their role may use."""
+    """The home screen for the caller: only cards for features their role may use."""
 
     cards: list[HomeCardOut] = []
-    quick_actions: list[QuickActionOut] = []
 
 
 class DocumentOut(BaseModel):
@@ -143,15 +137,6 @@ class AskRequest(BaseModel):
     # Recorded only, to measure how often the assistant asks and whether it needed to.
     picked: int | None = Field(default=None, ge=0, le=50)
     upload_id: UUID | None = None
-
-
-class SubjectOut(BaseModel):
-    """One subject open in a conversation, for staff to return to with a click."""
-
-    id: int
-    title: str  # "Transaction lookup: transfer TX-0002"
-    procedure: bool
-    current: bool  # the one the conversation is on
 
 
 class ProcedureOut(BaseModel):

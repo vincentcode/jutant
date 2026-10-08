@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends
 
 from api.deps import get_caller, get_runtime
-from api.schemas import HomeCardOut, HomeOut, QuickActionOut
+from api.schemas import HomeCardOut, HomeOut
 from config.container import Runtime
 from core.types import Caller
 
@@ -27,10 +27,5 @@ async def home(
             )
             for c in home.cards
             if c.feature in allowed
-        ],
-        quick_actions=[
-            QuickActionOut(label=a.label, feature_id=a.feature)
-            for a in home.quick_actions
-            if a.feature in allowed
         ],
     )

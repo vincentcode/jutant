@@ -194,12 +194,6 @@ class Orchestrator:
             ):
                 yield event
 
-    async def subjects(self, conversation_id: UUID) -> list[tuple[int, str, bool]]:
-        """The conversation's open subjects, top first: (id, title, is a procedure)."""
-        stack = ContextStack.from_dict(await self.conversations.context(conversation_id))
-        current = await self.runner.current(conversation_id)
-        return [(f.id, self._describe(f, current, stack), f.procedure) for f in stack.frames]
-
     async def _ask(
         self,
         caller: Caller,

@@ -109,16 +109,8 @@ class HomeCard(BaseModel):
     label: str = ""  # a short tag under it, e.g. "Payments"
 
 
-class QuickAction(BaseModel):
-    """A chip in the client's question box that picks a feature."""
-
-    label: str  # "Transaction"
-    feature: str
-
-
 class HomeDef(BaseModel):
     cards: list[HomeCard] = []
-    quick_actions: list[QuickAction] = []
 
 
 class PackManifest(BaseModel):

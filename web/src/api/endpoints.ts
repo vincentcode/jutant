@@ -27,11 +27,6 @@ export const startConversation = () => apiJson<Conversation>('/conversations', {
 export const history = (conversationId: string) =>
   apiJson<HistoryMessage[]>(`/conversations/${conversationId}/messages`)
 
-/** The subjects open in a conversation, current first, for staff to return to. */
-export type Subject = Schemas['SubjectOut']
-export const subjects = (conversationId: string) =>
-  apiJson<Subject[]>(`/conversations/${conversationId}/subjects`)
-
 /** The procedure in progress and the step it waits on, or null. */
 export type Procedure = Schemas['ProcedureOut']
 export const procedure = (conversationId: string) =>
@@ -73,7 +68,6 @@ export const deleteConversation = (conversationId: string) =>
 
 export type Home = Schemas['HomeOut']
 export type HomeCard = Schemas['HomeCardOut']
-export type QuickAction = Schemas['QuickActionOut']
 export type LibraryDocument = Schemas['DocumentOut']
 
 export const home = () => apiJson<Home>('/home')

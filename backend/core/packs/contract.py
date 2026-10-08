@@ -69,9 +69,6 @@ def check(pack: Pack, tool_specs: list[ToolSpec]) -> list[str]:
     for card in m.home.cards:
         if card.feature not in feature_ids:
             problems.append(f"home card {card.title!r}: unknown feature {card.feature}")
-    for action in m.home.quick_actions:
-        if action.feature not in feature_ids:
-            problems.append(f"quick action {action.label!r}: unknown feature {action.feature}")
     for tool in sorted(set(m.tool_labels) - tools):
         problems.append(f"tool_labels names {tool}, which no pack server offers")
 

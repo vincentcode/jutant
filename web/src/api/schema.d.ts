@@ -115,26 +115,6 @@ export interface paths {
         patch: operations["rename_api_conversations__conversation_id__patch"];
         trace?: never;
     };
-    "/api/conversations/{conversation_id}/subjects": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Subjects
-         * @description The subjects open in the conversation, current first, for staff to return to.
-         */
-        get: operations["subjects_api_conversations__conversation_id__subjects_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/conversations/{conversation_id}/procedure": {
         parameters: {
             query?: never;
@@ -327,9 +307,11 @@ export interface components {
             /** Preferred Feature Id */
             preferred_feature_id?: string | null;
             /** Reply As */
-            reply_as?: ("answer" | "question" | "resume" | "stop" | "return" | "continue") | null;
+            reply_as?: ("answer" | "question" | "resume" | "stop" | "return" | "continue" | "start") | null;
             /** Subject Id */
             subject_id?: number | null;
+            /** Picked */
+            picked?: number | null;
             /** Upload Id */
             upload_id?: string | null;
         };
@@ -477,7 +459,7 @@ export interface components {
         };
         /**
          * HomeOut
-         * @description The home screen for the caller: only cards and actions for features their role may use.
+         * @description The home screen for the caller: only cards for features their role may use.
          */
         HomeOut: {
             /**
@@ -485,11 +467,6 @@ export interface components {
              * @default []
              */
             cards: components["schemas"]["HomeCardOut"][];
-            /**
-             * Quick Actions
-             * @default []
-             */
-            quick_actions: components["schemas"]["QuickActionOut"][];
         };
         /** LoginRequest */
         LoginRequest: {
@@ -565,13 +542,6 @@ export interface components {
             /** Paused */
             paused: boolean;
         };
-        /** QuickActionOut */
-        QuickActionOut: {
-            /** Label */
-            label: string;
-            /** Feature Id */
-            feature_id: string;
-        };
         /**
          * StepOut
          * @description A playbook step a turn showed: the client shows the latest as a card, earlier ones as
@@ -603,20 +573,6 @@ export interface components {
             choices: string[];
             /** Answered */
             answered?: string | null;
-        };
-        /**
-         * SubjectOut
-         * @description One subject open in a conversation, for staff to return to with a click.
-         */
-        SubjectOut: {
-            /** Id */
-            id: number;
-            /** Title */
-            title: string;
-            /** Procedure */
-            procedure: boolean;
-            /** Current */
-            current: boolean;
         };
         /** UploadOut */
         UploadOut: {
@@ -851,37 +807,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConversationOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    subjects_api_conversations__conversation_id__subjects_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                conversation_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SubjectOut"][];
                 };
             };
             /** @description Validation Error */
