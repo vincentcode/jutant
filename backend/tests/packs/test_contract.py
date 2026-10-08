@@ -54,9 +54,16 @@ async def test_pack_passes_the_contract(pack_dir: Path) -> None:
 def test_banking_pack_loads_its_content() -> None:
     pack = load_pack(PACKS_DIR / "banking")
     assert pack.manifest.name == "banking"
-    assert len(pack.features) == 8
+    assert len(pack.features) == 9  # eight kinds of help, and conversation
     assert {p.id for p in pack.playbooks} == {"blocked_card", "dormant_account", "failed_transfer"}
     assert pack.system_prompt.startswith("You are the Bank Staff Assistant.")
     assert all(f.prompt for f in pack.features)
     assert pack.readable_classifications("teller") == ["public", "internal"]
     assert pack.extraction_schemas["payslip"][0] == "employer"
+
+
+def test_a_conversation_feature_takes_the_templates_own_examples() -> None:
+    pack = load_pack(PACKS_DIR / "banking")
+    [talk] = [f for f in pack.features if f.template == "conversation"]
+    assert "What tools do you have?" in talk.route_examples  # the platform's
+    assert "Hello, good morning" in talk.route_examples  # and the pack's

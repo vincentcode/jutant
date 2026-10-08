@@ -1,7 +1,6 @@
 import { useState, type FormEvent, type KeyboardEvent } from 'react'
 import { ArrowUp, FileText, Square, X } from 'lucide-react'
-import type { Feature, QuickAction, Upload } from '../api/endpoints'
-import { FeaturePicker } from './FeaturePicker'
+import type { Upload } from '../api/endpoints'
 import { UploadButton } from './UploadButton'
 
 interface Props {
@@ -11,15 +10,12 @@ interface Props {
   onStop: () => void
   onAttach: (file: File) => Promise<void>
   onDetach: () => void
-  features?: Feature[] // every kind of help, for "More"
-  quickActions?: QuickAction[] // the pack's chips in the box
-  selected?: string
-  onSelect?: (featureId: string | undefined) => void
   placeholder?: string
 }
 
-/** The question box: the question, an attachment, Send (or Stop while an answer is coming),
- * and the quick actions that pick a kind of help. */
+/** The question box: the question, an attachment, and Send (or Stop while an answer is
+ * coming). Staff do not pick a kind of help here: the assistant works it out, and asks when it
+ * cannot tell. */
 export function Composer({
   busy,
   attachment,
@@ -27,15 +23,9 @@ export function Composer({
   onStop,
   onAttach,
   onDetach,
-  features = [],
-  quickActions = [],
-  selected,
-  onSelect,
   placeholder = 'Ask anything about customers, payments or policies…',
 }: Props) {
   const [text, setText] = useState('')
-  const quick = new Set(quickActions.map((a) => a.feature_id))
-  const other = features.find((f) => f.id === selected && !quick.has(f.id))
 
   function submit(event?: FormEvent) {
     event?.preventDefault()
@@ -96,32 +86,6 @@ export function Composer({
           </button>
         )}
       </div>
-      {onSelect && features.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5 border-t border-line pt-2" role="group" aria-label="Quick actions">
-          <span className="text-xs text-muted">Quick actions:</span>
-          <button type="button" className="chip" aria-pressed={selected === undefined} onClick={() => onSelect(undefined)}>
-            Automatic
-          </button>
-          {quickActions.map((a) => (
-            <button
-              key={a.feature_id}
-              type="button"
-              className="chip"
-              aria-pressed={selected === a.feature_id}
-              onClick={() => onSelect(selected === a.feature_id ? undefined : a.feature_id)}
-            >
-              {a.label}
-            </button>
-          ))}
-          <FeaturePicker
-            features={features}
-            selected={selected}
-            onSelect={onSelect}
-            label={other?.title ?? 'More'}
-            pressed={other !== undefined}
-          />
-        </div>
-      )}
     </form>
   )
 }

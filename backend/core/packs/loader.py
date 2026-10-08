@@ -12,6 +12,7 @@ from typing import Any
 
 import yaml
 
+from core.features.templates import TEMPLATES
 from core.packs.manifest import PackManifest
 from core.policy.rules import FieldRule, Rule
 from core.types import (
@@ -69,7 +70,11 @@ def load_pack(path: str | Path) -> Pack:
             tools=tuple(f.tools),
             roles=tuple(f.roles),
             route_patterns=tuple(f.route.patterns),
-            route_examples=tuple(f.route.examples),
+            # A template's own examples (the conversation's "what tools do you have?") too.
+            route_examples=(
+                *f.route.examples,
+                *getattr(TEMPLATES.get(f.template), "route_examples", ()),
+            ),
             suggestions=tuple(f.suggestions),
             ask_for=f.ask_for,
             follow_ups=f.follow_ups,

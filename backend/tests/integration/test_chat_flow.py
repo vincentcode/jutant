@@ -250,6 +250,28 @@ async def test_customer_360_for_customer_service_with_figures_from_code() -> Non
     assert '"total_balance":{"GHS":"6021.25"}' in tool_message
 
 
+async def test_a_greeting_is_talked_to_not_searched() -> None:
+    await make_staff("ama")
+    async with api(ModelReply("conversation"), ModelReply("Hello! What do you need?")) as client:
+        await client.login("ama")
+        conversation_id = await client.conversation()
+        events = await client.ask(conversation_id, text="Good morning")
+    assert tools_used(events) == []
+    assert answer(events)["text"] == "Hello! What do you need?"  # not "no source found"
+    assert answer(events)["feature_id"] == "conversation"
+
+
+async def test_the_conversation_hands_a_request_to_a_feature() -> None:
+    await make_staff("ama")
+    hand_over = ModelReply(None, (ToolCall("1", "transaction_lookup", {}),))
+    async with api(ModelReply("conversation"), hand_over) as client:
+        await client.login("ama")
+        conversation_id = await client.conversation()
+        events = await client.ask(conversation_id, text="Help me with a customer's payment")
+    assert answer(events)["feature_id"] == "transaction_lookup"
+    assert answer(events)["text"].startswith("Which transfer or account?")  # its ask_for
+
+
 async def test_every_banking_feature_is_covered_here() -> None:
     from django.conf import settings
 
@@ -264,6 +286,7 @@ async def test_every_banking_feature_is_covered_here() -> None:
         "troubleshooting",
         "document_summary_extraction",
         "customer_360",
+        "conversation",
     }
     assert {f.id for f in load_pack(settings.JUTANT_PACK_PATH).features} == covered
 

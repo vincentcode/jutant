@@ -26,8 +26,9 @@ from core.types import Feature, PlaybookStep
 Action = Literal["continue", "return", "new", "stop"]
 # What staff say a message is, so it is not read: a step answer clicked on its card, the answer
 # to "is that your answer or a new question?" or "is this about X, or something new?", the
-# paused procedure's Resume and Stop, or a subject chip clicked to return to it.
-ReplyAs = Literal["answer", "question", "resume", "stop", "return", "continue"]
+# paused procedure's Resume and Stop, a subject chip clicked to return to it, or a kind of help
+# picked to start (`start`, with the feature: the message is its title, not a question).
+ReplyAs = Literal["answer", "question", "resume", "stop", "return", "continue", "start"]
 
 INSTRUCTION = (
     "A staff member is working with an assistant. Their open subjects, most recent first:\n"
@@ -174,6 +175,8 @@ def _options(
         add(Option("continue", "more about subject 1, the same thing"), Reading("continue", top.id))
     for number, frame in enumerate(stack.frames[1:4], 2):
         add(Option(f"back_{number}", f"back to subject {number}"), Reading("return", frame.id))
+    if not features:  # the feature is chosen later (agent mode): only that it is new
+        add(Option("new", "a different subject from these"), Reading("new"))
     for feature in features:
         # Always a new subject, even for subject 1's feature: "and the Standard Savings rate?"
         # after Business Current is a new product, and must not take Business Current's code.

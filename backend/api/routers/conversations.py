@@ -217,6 +217,7 @@ async def ask(
             preferred_feature_id=body.preferred_feature_id,
             reply_as=body.reply_as,
             subject_id=body.subject_id,
+            picked=body.picked,
         )
 
     return StreamingResponse(

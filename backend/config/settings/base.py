@@ -143,6 +143,11 @@ JUTANT_ROUTE_MIN_SIMILARITY = float(env("JUTANT_ROUTE_MIN_SIMILARITY", "0.80"))
 JUTANT_ROUTE_MIN_MARGIN = float(env("JUTANT_ROUTE_MIN_MARGIN", "0.05"))
 
 JUTANT_MAX_STEPS = int(env("JUTANT_MAX_STEPS", "4"))
+# How a new subject's feature is chosen. hybrid: the router when it is sure, else the
+# conversation (which hands over, asks or talks). route: always the router. agent: always the
+# conversation, the model seeing the features as tools. hybrid and agent need the pack's
+# default_feature to be a conversation feature (else they behave as route).
+JUTANT_TURN_MODE = env("JUTANT_TURN_MODE", "hybrid")
 JUTANT_HISTORY_LIMIT = int(env("JUTANT_HISTORY_LIMIT", "6"))
 JUTANT_MAX_CONCURRENT_GENERATIONS = int(env("JUTANT_MAX_CONCURRENT_GENERATIONS", "2"))
 

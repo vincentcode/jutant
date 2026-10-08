@@ -103,7 +103,7 @@ class Prefetch:
 @dataclass(frozen=True)
 class Feature:
     id: str
-    template: str  # one of the six template ids
+    template: str  # one of the platform's template ids
     title: str
     description: str  # used by the router
     prompt: str  # resolved prompt text

@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { CircleUserRound, ListChecks, Undo2, X } from 'lucide-react'
+import { CircleUserRound, ListChecks, X } from 'lucide-react'
 import * as api from '../api/endpoints'
 import type { Upload } from '../api/endpoints'
+import type { Choice } from '../api/events'
 import type { ReplyAs } from '../api/stream'
 import { useAppInfo, useTheme } from '../app/appearance'
 import { useAuth } from '../auth/AuthProvider'
@@ -47,12 +48,6 @@ export function ChatPage() {
     queryFn: () => api.history(conversationId!),
     enabled: Boolean(conversationId),
   })
-  // The subjects open in the conversation: earlier ones are offered as chips to return to.
-  const subjects = useQuery({
-    queryKey: ['subjects', conversationId],
-    queryFn: () => api.subjects(conversationId!),
-    enabled: Boolean(conversationId),
-  })
   // A procedure paused while staff ask other things, to offer Resume and Stop.
   const procedure = useQuery({
     queryKey: ['procedure', conversationId],
@@ -65,7 +60,6 @@ export function ChatPage() {
       void queryClient.invalidateQueries({ queryKey: ['history', id] })
       void queryClient.invalidateQueries({ queryKey: ['conversations'] })
       void queryClient.invalidateQueries({ queryKey: ['procedure', id] })
-      void queryClient.invalidateQueries({ queryKey: ['subjects', id] })
     },
     [queryClient],
   )
@@ -114,25 +108,53 @@ export function ChatPage() {
   // for another feature. With a file attached, the chosen feature reads it, whatever the words.
   // During a procedure, `replyAs` says what the message is (an answer clicked on the step card,
   // Resume, Stop...), so the server does not need to read it.
-  async function ask(text: string, feature = featureId, replyAs?: ReplyAs, subjectId?: number) {
+  async function ask(
+    text: string,
+    feature = featureId,
+    replyAs?: ReplyAs,
+    subjectId?: number,
+    picked?: number,
+  ) {
     const id = await ensureConversation()
     setStreamFor(id)
-    const said = { reply_as: replyAs, subject_id: subjectId }
+    const said = { reply_as: replyAs, subject_id: subjectId, picked }
+    setFeatureId(undefined) // a card's or an upload's kind of help is for this message only
+    setHint(undefined)
     void send(
       id,
       attachment
         ? { text, feature_id: feature, upload_id: attachment.upload_id, ...said }
         : { text, preferred_feature_id: feature, ...said },
+      picked !== undefined, // sent again after a pick: already shown
     )
   }
 
-  // When the question was for another feature, the quick action follows it.
-  useEffect(() => {
-    if (state.switchedFrom && state.featureId) {
-      setFeatureId(state.featureId)
-      setHint(undefined)
+  /** Staff picked what a message is, when the assistant could not tell: it is sent again
+   * saying so. When the assistant had asked them in words what they need ("How can I help?"),
+   * there is nothing to send again: the kind of help picked starts, and asks what they need. */
+  async function pick(text: string, choice: Choice, picked: number) {
+    if (state.clarifyReason === 'talk' && choice.kind === 'feature') {
+      const id = await ensureConversation()
+      setStreamFor(id)
+      void send(id, { text: choice.title, feature_id: choice.feature_id ?? undefined, reply_as: 'start', picked })
+      return
     }
-  }, [state.switchedFrom, state.featureId])
+    switch (choice.kind) {
+      case 'answer':
+        return ask(text, undefined, 'answer', undefined, picked)
+      case 'subject':
+        return ask(text, undefined, 'continue', choice.subject_id ?? undefined, picked)
+      case 'resume':
+        return ask('Resume the procedure', undefined, 'resume', undefined, picked)
+      case 'new':
+        return ask(text, undefined, 'question', undefined, picked)
+      case 'feature': {
+        const id = await ensureConversation()
+        setStreamFor(id)
+        void send(id, { text, feature_id: choice.feature_id ?? undefined, reply_as: 'question', picked }, true)
+      }
+    }
+  }
 
   /** Ask in a new conversation, whatever is open (a document summary from Knowledge). The
    * feature applies to this question only: a follow-up is routed afresh, not summarised again. */
@@ -179,10 +201,6 @@ export function ChatPage() {
       onStop={stop}
       onAttach={attach}
       onDetach={() => setAttachment(undefined)}
-      features={features.data ?? []}
-      quickActions={home.data?.quick_actions ?? []}
-      selected={featureId}
-      onSelect={chooseFeature}
       placeholder={hint}
     />
   )
@@ -256,30 +274,12 @@ export function ChatPage() {
               onRate={rate}
               featureTitles={featureTitles}
             />
-            {streamFor === conversationId && state.unclear && state.question && !busy && (
-              <ReplyUnclear
-                question={state.question}
-                step={state.unclear}
-                onAnswer={() => void ask(state.question!, undefined, 'answer')}
-                onQuestion={() => void ask(state.question!, undefined, 'question')}
+            {streamFor === conversationId && state.choices?.length && state.question && !busy ? (
+              <Picker
+                choices={state.choices}
+                onPick={(choice, picked) => void pick(state.question!, choice, picked)}
               />
-            )}
-            {streamFor === conversationId && state.subjectUnclear && state.question && !busy && (
-              <WhichSubject
-                question={state.question}
-                subject={shortTitle(state.subjectUnclear.subjectTitle)}
-                onSame={() =>
-                  void ask(state.question!, undefined, 'continue', state.subjectUnclear!.subjectId)
-                }
-                onNew={() => void ask(state.question!, undefined, 'question')}
-              />
-            )}
-            {!busy && (
-              <EarlierSubjects
-                subjects={(subjects.data ?? []).filter((s) => !s.current && !s.procedure)}
-                onReturn={(subject) => void ask(`Back to ${shortTitle(subject.title)}`, undefined, 'return', subject.id)}
-              />
-            )}
+            ) : null}
             {procedure.data?.paused && !busy && (
               <PausedProcedure
                 procedure={procedure.data}
@@ -289,7 +289,7 @@ export function ChatPage() {
             )}
             {streamFor === conversationId && state.switchedFrom && state.featureId && (
               <p role="status" className="mx-auto mb-1 w-full max-w-3xl px-5 text-xs text-muted">
-                Switched from {featureTitles[state.switchedFrom] ?? 'your quick action'} to{' '}
+                Switched from {featureTitles[state.switchedFrom] ?? 'the card you chose'} to{' '}
                 {featureTitles[state.featureId] ?? 'another kind of help'}: the question was about that.
               </p>
             )}
@@ -307,33 +307,6 @@ export function ChatPage() {
           />
         )}
       </main>
-    </div>
-  )
-}
-
-/** Staff's message during a procedure could not be read as an answer or a new question. */
-function ReplyUnclear({
-  question,
-  step,
-  onAnswer,
-  onQuestion,
-}: {
-  question: string
-  step: { stepOrder: number; stepTitle: string }
-  onAnswer: () => void
-  onQuestion: () => void
-}) {
-  return (
-    <div role="group" aria-label="Answer or new question?" className="mx-auto mb-2 flex w-full max-w-3xl flex-wrap items-center gap-2 px-5 text-sm">
-      <span className="text-muted">
-        Is “{question}” your answer to step {step.stepOrder} ({step.stepTitle}), or a new question?
-      </span>
-      <button type="button" className="chip" onClick={onAnswer}>
-        My answer to step {step.stepOrder}
-      </button>
-      <button type="button" className="chip" onClick={onQuestion}>
-        A new question
-      </button>
     </div>
   )
 }
@@ -368,65 +341,31 @@ function PausedProcedure({
   )
 }
 
-/** The message could be about an open subject or something new, and the assistant could not
- * tell: staff say which, and it is asked again saying so. */
-function WhichSubject({
-  question,
-  subject,
-  onSame,
-  onNew,
+/** The assistant could not tell what staff's message is: the open subjects, the waiting step and
+ * the kinds of help, to pick from. A pick sends the message again saying which. */
+function Picker({
+  choices,
+  onPick,
 }: {
-  question: string
-  subject: string
-  onSame: () => void
-  onNew: () => void
+  choices: Choice[]
+  onPick: (choice: Choice, picked: number) => void
 }) {
   return (
-    <div role="group" aria-label="Which subject?" className="mx-auto mb-2 flex w-full max-w-3xl flex-wrap items-center gap-2 px-5 text-sm">
-      <span className="text-muted">
-        Is “{question}” about {subject}, or something new?
-      </span>
-      <button type="button" className="chip" onClick={onSame}>
-        About {subject}
-      </button>
-      <button type="button" className="chip" onClick={onNew}>
-        Something new
-      </button>
-    </div>
-  )
-}
-
-/** Earlier subjects of the conversation: a click returns to one, so its details (a transfer, a
- * product) are used again without repeating them. */
-function EarlierSubjects({
-  subjects,
-  onReturn,
-}: {
-  subjects: api.Subject[]
-  onReturn: (subject: api.Subject) => void
-}) {
-  if (subjects.length === 0) return null
-  return (
-    <div role="group" aria-label="Earlier subjects" className="mx-auto mb-2 flex w-full max-w-3xl flex-wrap items-center gap-1.5 px-5 text-xs">
-      <span className="text-muted">Back to:</span>
-      {subjects.map((subject) => (
+    <div
+      role="group"
+      aria-label="What is this about?"
+      className="mx-auto mb-2 flex w-full max-w-3xl flex-wrap items-center gap-2 px-5 text-sm"
+    >
+      {choices.map((choice, picked) => (
         <button
-          key={subject.id}
+          key={`${choice.kind}:${choice.subject_id ?? choice.feature_id ?? choice.title}`}
           type="button"
-          className="chip px-2.5 py-0.5 text-xs"
-          title={subject.title}
-          onClick={() => onReturn(subject)}
+          className="chip"
+          onClick={() => onPick(choice, picked)}
         >
-          <Undo2 aria-hidden className="size-3" />
-          {shortTitle(subject.title)}
+          {choice.title}
         </button>
       ))}
     </div>
   )
-}
-
-/** "Transaction lookup: transfer TX-0002" -> "transfer TX-0002": what the subject is about. */
-export function shortTitle(title: string): string {
-  const about = title.split(': ').slice(1).join(': ')
-  return about || title
 }

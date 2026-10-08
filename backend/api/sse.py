@@ -18,13 +18,12 @@ from api.queue import GenerationQueue
 from api.schemas import StepOut
 from core.errors import PolicyDenied
 from core.events import (
+    Clarify,
     Completed,
     Event,
     Failed,
     FeatureSelected,
     PlaybookStepShown,
-    ReplyUnclear,
-    SubjectUnclear,
     TextDelta,
     ToolFinished,
     ToolStarted,
@@ -90,11 +89,22 @@ def to_frame(event: Event, labels: Mapping[str, str] | None = None) -> str:
             )
         case Failed(reason):
             return frame("failed", {"reason": reason})
-        case ReplyUnclear(step_order, step_title):
-            return frame("reply_unclear", {"step_order": step_order, "step_title": step_title})
-        case SubjectUnclear(subject_id, subject_title):
+        case Clarify(question, choices, reason):
             return frame(
-                "subject_unclear", {"subject_id": subject_id, "subject_title": subject_title}
+                "clarify",
+                {
+                    "question": question,
+                    "reason": reason,
+                    "choices": [
+                        {
+                            "kind": c.kind,
+                            "title": c.title,
+                            "subject_id": c.subject_id,
+                            "feature_id": c.feature_id,
+                        }
+                        for c in choices
+                    ],
+                },
             )
     raise TypeError(f"unknown event {event!r}")
 

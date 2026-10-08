@@ -37,8 +37,10 @@ export function MessageList({
   // The server stores the question when the turn starts, so history fetched mid-answer (on
   // returning to the window, say) already ends with it; show it once, not again from the stream.
   const last = messages[messages.length - 1]
+  // A message sent again after a pick in "What is this about?" is already in history too.
   const questionInHistory =
-    stream !== undefined && last?.role === 'user' && last.content === stream.question
+    stream !== undefined &&
+    (stream.repeat || (last?.role === 'user' && last.content === stream.question))
   const current = currentStep(messages, stream, busy)
 
   return (

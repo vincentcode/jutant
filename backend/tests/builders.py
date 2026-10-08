@@ -7,7 +7,7 @@ from typing import Any
 from core.events import Completed, Event, Failed
 from core.features.registry import FeatureRegistry
 from core.features.router import FeatureRouter
-from core.orchestrator.orchestrator import Orchestrator
+from core.orchestrator.orchestrator import Orchestrator, TurnMode
 from core.tools.catalog import ToolCatalog
 from core.tools.gateway import ToolGateway
 from core.types import (
@@ -144,6 +144,8 @@ async def make_rig(
     max_steps: int = 4,
     extraction_schemas: dict[str, list[str]] | None = None,
     entity_types: tuple[EntityType, ...] = (),
+    default: str = "policy_qa",
+    turn_mode: TurnMode = "route",
 ) -> Rig:
     model = model or FakeModel()
     tools = FakeToolClient(
@@ -162,12 +164,13 @@ async def make_rig(
         playbooks=store,
         audit=audit,
         registry=registry,
-        router=FeatureRouter(model, registry, default="policy_qa"),
+        router=FeatureRouter(model, registry, default=default),
         gateway=gateway,
         max_steps=max_steps,
         system_prompt="You help bank staff.",
         extraction_schemas=extraction_schemas,
         entity_types=entity_types,
+        turn_mode=turn_mode,
     )
     await orchestrator.load_tools()
     return Rig(orchestrator, model, tools, conversations, store, audit)

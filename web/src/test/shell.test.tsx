@@ -2,7 +2,6 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
-import type { Feature } from "../api/endpoints";
 import { Composer } from "../chat/Composer";
 import { HomeScreen, greeting } from "../home/HomeScreen";
 import { IconRail } from "../shell/IconRail";
@@ -33,33 +32,6 @@ function serve(body: unknown) {
 }
 
 afterEach(() => vi.unstubAllGlobals());
-
-const FEATURES: Feature[] = [
-  {
-    id: "transaction_lookup",
-    template: "record_lookup",
-    title: "Transaction lookup",
-    description: "d",
-    group: "Look something up",
-    examples: ["Why did transfer TX-0002 fail?"],
-  },
-  {
-    id: "policy_qa",
-    template: "document_qa",
-    title: "Policy Q&A",
-    description: "d",
-    group: "Policies and documents",
-    examples: [],
-  },
-  {
-    id: "code_explainer",
-    template: "document_qa",
-    title: "Code explainer",
-    description: "d",
-    group: "Policies and documents",
-    examples: [],
-  },
-];
 
 describe("HomeScreen", () => {
   it("greets by name and starts a feature from a card", () => {
@@ -100,46 +72,19 @@ describe("HomeScreen", () => {
   });
 });
 
-describe("Composer quick actions", () => {
-  const base = {
-    busy: false,
-    onSend: vi.fn(),
-    onStop: vi.fn(),
-    onAttach: vi.fn(),
-    onDetach: vi.fn(),
-  };
-
-  it("picks a kind of help from a chip, and the rest from More", () => {
-    const onSelect = vi.fn();
-    const quick = [{ label: "Transaction", feature_id: "transaction_lookup" }];
-    const { rerender } = render(
+describe("Composer", () => {
+  it("has no kind-of-help chips: the assistant works it out", () => {
+    render(
       <Composer
-        {...base}
-        features={FEATURES}
-        quickActions={quick}
-        selected={undefined}
-        onSelect={onSelect}
+        busy={false}
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+        onAttach={vi.fn()}
+        onDetach={vi.fn()}
       />,
     );
-    expect(screen.getByRole("button", { name: "Automatic" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Transaction" }));
-    expect(onSelect).toHaveBeenLastCalledWith("transaction_lookup");
-
-    rerender(
-      <Composer
-        {...base}
-        features={FEATURES}
-        quickActions={quick}
-        selected="code_explainer"
-        onSelect={onSelect}
-      />,
-    );
-    expect(
-      screen.getByRole("button", { name: /Code explainer/ }),
-    ).toHaveAttribute("aria-haspopup", "menu");
+    expect(screen.queryByRole("group", { name: "Quick actions" })).toBeNull();
+    expect(screen.getByRole("textbox", { name: "Ask a question" })).toBeInTheDocument();
   });
 });
 

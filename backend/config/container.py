@@ -19,7 +19,7 @@ from core.errors import PackContractError
 from core.features.registry import FeatureRegistry
 from core.features.router import FeatureRouter
 from core.observability import TraceContent
-from core.orchestrator.orchestrator import Orchestrator
+from core.orchestrator.orchestrator import Orchestrator, TurnMode
 from core.packs.contract import check
 from core.packs.loader import Pack, load_pack
 from core.ports import ModelProvider
@@ -122,6 +122,8 @@ def build_runtime(
         tracer=tracing.build(settings),
         trace_content=TraceContent(include=settings.JUTANT_TRACE_CONTENT),
         entity_types=pack.entity_types,
+        turn_mode=_turn_mode(settings.JUTANT_TURN_MODE),
+        tool_labels=pack.manifest.tool_labels,
     )
     return Runtime(
         feedback=tracing.feedback_sink(settings),
@@ -139,3 +141,7 @@ def build_runtime(
         conversations=conversations,
         ocr=ocr or TesseractOcr(),
     )
+
+
+def _turn_mode(name: str) -> TurnMode:
+    return name if name in ("route", "hybrid", "agent") else "hybrid"  # type: ignore[return-value]
