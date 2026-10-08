@@ -1,7 +1,9 @@
 """`record_lookup` template.
 
 Answers a question about one record (a transaction, a product...). The model calls the
-pack's lookup tools and restates the fields that answer the question, citing the record.
+pack's lookup tools and restates the fields that answer the question, citing the record. A
+record fetched in code is set out as facts, and a question no field of it answers is answered
+in code: the record does not show that (`core.features.records`).
 """
 
 from collections.abc import AsyncIterator
@@ -15,4 +17,4 @@ class RecordLookupTemplate:
     requires_citation = True
 
     def run(self, ctx: FeatureContext) -> AsyncIterator[Event]:
-        return tool_loop(ctx)
+        return tool_loop(ctx, records=True)

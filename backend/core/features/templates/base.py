@@ -14,6 +14,14 @@ from core.context.entities import values_in
 from core.errors import InvalidToolCall, ModelUnavailable, UnknownTool
 from core.events import Event, Failed, TextDelta, ToolFinished, ToolStarted
 from core.features.prefetch import chosen_calls, planned_calls
+from core.features.records import (
+    NONE,
+    document_sources,
+    facts,
+    field_asked,
+    not_shown,
+    single_record,
+)
 from core.observability import Trace
 from core.ports import AuditSink, ModelProvider, PlaybookStore
 from core.types import (
@@ -84,7 +92,7 @@ class FeatureTemplate(Protocol):
 
 
 async def tool_loop(
-    ctx: FeatureContext, extra_calls: Sequence[ToolCall] = ()
+    ctx: FeatureContext, extra_calls: Sequence[ToolCall] = (), records: bool = False
 ) -> AsyncIterator[Event]:
     """Model, tool calls, model again, until the model answers in text.
 
@@ -105,6 +113,10 @@ async def tool_loop(
     repeat it.
 
     Replies are streamed, except one that may still be dropped that way.
+
+    With `records`, when the calls made in code fetched exactly one record, its facts are set
+    out in code and the model picks which field the question is about; if none says it, the
+    answer is written in code ("the record does not show that"), see `core.features.records`.
 
     A call the policy refuses ends the turn at once, as `denied`: the model cannot change who
     the caller is, and asking it to write about the refusal would only keep staff waiting.
@@ -130,6 +142,13 @@ async def tool_loop(
                 yield Failed(DENIED)
                 return
             messages.append(Message("tool", tool_message(ctx.results[-1]), tool_call_id=call.id))
+
+    if records and (record := single_record(ctx.results)) is not None:
+        field = await field_asked(ctx.model, ctx.question, record)
+        if field == NONE:
+            yield TextDelta(not_shown(record, document_sources(ctx.results)))
+            return
+        messages.append(Message("system", facts(record, field)))
 
     failures = 0
     nudged = False

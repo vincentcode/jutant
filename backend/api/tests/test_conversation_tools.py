@@ -31,7 +31,13 @@ async def test_features_come_grouped_with_example_questions() -> None:
 async def test_conversations_can_be_searched_renamed_and_deleted_by_their_owner() -> None:
     await make_staff("ama")
     await make_staff("kofi")
-    async with api(ModelReply("It failed: account closed."), ModelReply("8.5%.")) as client:
+    replies = [  # each lookup: the record's field the question is about, then the answer
+        ModelReply("failure_reason"),
+        ModelReply("It failed: account closed."),
+        ModelReply("overview"),
+        ModelReply("8.5%."),
+    ]
+    async with api(*replies) as client:
         await client.login("ama")
         transfer = await client.conversation()
         await client.ask(transfer, text="Why did TX-0002 fail?", feature_id="transaction_lookup")

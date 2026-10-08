@@ -59,7 +59,7 @@ def calls(name: str, **arguments) -> ModelReply:
 async def test_teller_asks_why_a_transfer_failed() -> None:
     model = FakeModel(
         replies=[
-            calls("transactions.get_status", reference="TX-0002"),
+            ModelReply("failure_reason"),  # the record's field the question is about
             ModelReply("TX-0002 failed (E51): the beneficiary account is closed."),
         ]
     )
@@ -70,10 +70,13 @@ async def test_teller_asks_why_a_transfer_failed() -> None:
 
     answer = events[-1].answer
     assert answer.citations == (Citation("record", "Transaction", "TX-0002"),)
-    system_prompt = model.calls[0].messages[0].content
+    picked, answered = model.calls
+    assert picked.tools == [] and "failure reason: Beneficiary account closed" in str(picked)
+    system_prompt = answered.messages[0].content
     assert system_prompt.startswith("You are the Bank Staff Assistant.")
     assert "transactions.get_status" in system_prompt  # the feature's own prompt
-    assert [s.name for s in model.calls[0].tools] == [
+    assert answered.messages[-1].content.startswith("The facts the record transaction TX-0002")
+    assert [s.name for s in answered.tools] == [
         "transactions.list",
         "transactions.get_status",
         "documents.search",  # for the failure code's explanation

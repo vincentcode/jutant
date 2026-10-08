@@ -21,8 +21,11 @@ async def test_a_turn_streams_every_event_in_order() -> None:
     await make_staff("ama")
     # The reference is in the question, so the status lookup is made in code (prefetch), then
     # the failure code it points to is looked up in the documents (a second round), and the
-    # model only writes the answer, which streams once the turn has a source.
-    async with api(ModelReply("It failed: beneficiary account closed.")) as client:
+    # model picks the record's field the question is about, then only writes the answer, which
+    # streams once the turn has a source.
+    async with api(
+        ModelReply("failure_reason"), ModelReply("It failed: beneficiary account closed.")
+    ) as client:
         await client.login("ama")
         events = await client.ask(
             await client.conversation(),

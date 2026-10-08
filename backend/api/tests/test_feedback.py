@@ -32,7 +32,10 @@ def url(conversation: str, message: str) -> str:
 
 async def test_staff_rate_an_answer_and_can_change_their_mind() -> None:
     await make_staff("ama", staff_number="S0042")
-    async with api(ModelReply("It failed: the beneficiary account is closed.")) as client:
+    async with api(
+        ModelReply("failure_reason"),  # the record's field the question is about
+        ModelReply("It failed: the beneficiary account is closed."),
+    ) as client:
         sink = RecordingSink()
         client.runtime.feedback = sink
         await client.login("ama")

@@ -469,9 +469,8 @@ async def test_clicking_a_subject_returns_to_it_without_the_model() -> None:
     )
     await ask(rig, conversation, "check TX-0002", "transaction_lookup")
     await ask(rig, conversation, "what ID do joint holders need?")
-    transfer = next(
-        id_ for id_, title, _ in await rig.orchestrator.subjects(conversation) if "TX-0002" in title
-    )
+    stack = await stack_of(rig, conversation)
+    transfer = next(f.id for f in stack.frames if f.feature_id == "transaction_lookup")
     calls = len(model.calls)
     events = await ask(
         rig, conversation, "Back to the transfer", reply_as="return", subject_id=transfer
@@ -646,7 +645,9 @@ async def test_a_second_prefetch_round_follows_what_the_record_points_to() -> No
         ),
     )
     feats = tuple(explained if f.id == explained.id else f for f in EXAMPLES)
-    rig, _, conversation = await bank(ModelReply("Closed; returned in two days."), feats=feats)
+    rig, _, conversation = await bank(
+        ModelReply("overview"), ModelReply("Closed; returned in two days."), feats=feats
+    )
     rig.tools.results["transactions.get_status"] = record_result(
         "Transaction", "TX-0002", {"failure_code": "E51"}
     )
@@ -677,3 +678,26 @@ async def test_a_kind_of_help_picked_to_start_asks_for_what_it_needs() -> None:
     assert (await stack_of(rig, conversation)).top.feature_id == "transaction_lookup"
     stored = [(m.role, m.content) for m in await rig.conversations.recent_messages(conversation, 5)]
     assert stored == [("user", "Transaction lookup"), ("assistant", WHICH_TRANSFER)]
+
+
+FAILED = {"status": "failed", "failure_code": "E51", "failure_reason": "Beneficiary closed"}
+
+
+async def test_a_question_no_field_of_the_record_answers_is_answered_in_code() -> None:
+    rig, model, conversation = await bank(ModelReply("none"))  # no field says it
+    rig.tools.results["transactions.get_status"] = record_result("Transaction", "TX-0002", FAILED)
+    events = await ask(rig, conversation, "Was TX-0002 reversed?", "transaction_lookup")
+    assert texts(events) == ["The record for transaction TX-0002 does not show that."]
+    assert events[-1].answer.citations  # still the record's
+    assert len(model.calls) == 1  # only the pick: the model never writes this answer
+    assert "failure reason: Beneficiary closed" in model.calls[0].messages[0].content
+
+
+async def test_the_records_facts_and_the_field_asked_go_to_the_model() -> None:
+    rig, model, conversation = await bank(ModelReply("failure_reason"), ModelReply("Closed."))
+    rig.tools.results["transactions.get_status"] = record_result("Transaction", "TX-0002", FAILED)
+    events = await ask(rig, conversation, "Why did TX-0002 fail?", "transaction_lookup")
+    assert events[-1].answer.text == "Closed."
+    facts = model.calls[1].messages[-1].content
+    assert "- failure code: E51" in facts and "never state one as something" in facts
+    assert facts.endswith("The question is about its failure reason.")
