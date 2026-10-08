@@ -23,7 +23,7 @@ def test_feature_with_no_roles_allows_everyone() -> None:
     assert not restricted.allows("teller")
 
 
-def test_six_templates_registered() -> None:
+def test_templates_registered() -> None:
     assert set(TEMPLATES) == {
         "document_qa",
         "record_lookup",
@@ -31,9 +31,11 @@ def test_six_templates_registered() -> None:
         "guided_playbook",
         "document_extraction",
         "checklist",
+        "conversation",
     }
     assert TEMPLATES["document_qa"].requires_citation
     assert not TEMPLATES["guided_playbook"].requires_citation
+    assert not TEMPLATES["conversation"].requires_citation
 
 
 async def test_fake_model_replays_and_records() -> None:

@@ -18,6 +18,18 @@ the question is routed as usual, from the meaning step, and the model may still 
 embedding model scores most features between 0.7 and 0.8 for any banking question, so requiring
 another feature to be clearly similar enough would almost never leave a quick action.)
 
+With `guess=False` (the hybrid turn mode) the router does not guess: when neither a pattern, the
+quick action nor a clear meaning decides, the model still chooses (the conversation is one of
+its options), but if it cannot, the message goes to the pack's default feature, the
+conversation, which hands it over, asks staff, or talks (`unsure`), not to the keywords' or the
+default's pick. (The model choosing one id from a list is far more reliable on a small model
+than the conversation deciding by tool calls, so it is kept.) A pattern says
+what a message is about, not what it asks: "transfer 500 to 0011223344 for me" names an account
+but asks for an action. So without guessing, a pattern decides unless the meaning clearly
+favours the default feature (the conversation: a request to act, or about the assistant), by
+the margin; a pattern that names what is asked ("summarise") is kept even when another feature
+scores higher.
+
 The router decides only a new subject's feature: which subject a turn is about is the
 conversation context's to decide (`core.context`).
 
@@ -40,7 +52,9 @@ INSTRUCTION = "Choose the feature that best matches the staff member's question.
 MIN_SIMILARITY = 0.80
 MIN_MARGIN = 0.05
 
-RoutedBy = Literal["only", "pattern", "meaning", "preferred", "model", "keywords", "default"]
+RoutedBy = Literal[
+    "only", "pattern", "meaning", "preferred", "model", "keywords", "default", "unsure"
+]
 
 
 @dataclass(frozen=True)
@@ -77,10 +91,12 @@ class FeatureRouter:
         model: ModelProvider | None = None,
         prefer: str | None = None,
         exclude: Collection[str] = (),
+        guess: bool = True,
     ) -> Route:
         """`model` stands in for the router's own for this question (a traced one, say).
         `prefer`: staff's quick action. A feature the role may not use is ignored. `exclude`:
-        features this turn may not start (another procedure while one is open)."""
+        features this turn may not start (another procedure while one is open). `guess=False`:
+        when the model cannot choose, the default feature (`unsure`), not the keywords' pick."""
         model = model or self.model
         available = [f for f in self.registry.for_role(caller.role) if f.id not in exclude]
         if not available:
@@ -92,10 +108,22 @@ class FeatureRouter:
         matched = self._matching(text, available)
         if preferred is not None and preferred in matched:
             return Route(preferred, "preferred")
-        if len(matched) == 1:
+        if len(matched) == 1 and guess:
             return Route(matched[0], "pattern")
 
         scored = await self._scores(text, available, model)
+        if len(matched) == 1:  # not guessing: the pattern, unless the meaning says otherwise
+            own = next((score for score, f in scored if f is matched[0]), 0.0)
+            default = by_id.get(self.default)
+            if (
+                default is not None
+                and default is not matched[0]
+                and scored
+                and scored[0][1] is default
+                and scored[0][0] - own >= self.min_margin
+            ):
+                return Route(default, "unsure")
+            return Route(matched[0], "pattern")
         if preferred is not None:
             own = next((score for score, f in scored if f is preferred), 0.0)
             best = scored[0][0] if scored else 0.0
@@ -106,6 +134,8 @@ class FeatureRouter:
         options = [Option(f.id, f.description) for f in available]
         if chosen := await ask_model(model, INSTRUCTION, text, options):
             return Route(by_id[chosen], "model")
+        if not guess and (default := by_id.get(self.default)) is not None:
+            return Route(default, "unsure")
         if chosen := best_keyword_match(text, options):
             return Route(by_id[chosen], "keywords")
         return Route(by_id.get(self.default, available[0]), "default")

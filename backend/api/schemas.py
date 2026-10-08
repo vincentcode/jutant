@@ -131,11 +131,17 @@ class AskRequest(BaseModel):
     preferred_feature_id: str | None = Field(default=None, max_length=64)
     # During a procedure, what staff say the message is, so it is not read by the model: an
     # answer clicked on the step card, the reply to "your answer or a new question?", or the
-    # paused procedure's Resume and Stop.
-    reply_as: Literal["answer", "question", "resume", "stop", "return", "continue"] | None = None
+    # paused procedure's Resume and Stop. Or "start": a kind of help staff picked (feature_id)
+    # after the assistant asked them what they need; the text is its title.
+    reply_as: (
+        Literal["answer", "question", "resume", "stop", "return", "continue", "start"] | None
+    ) = None
     # With reply_as "return": the subject chip staff clicked. With "continue": the subject staff
     # said the message is about, answering "is this about X, or something new?".
     subject_id: int | None = None
+    # Sent again after staff picked a choice in "What is this about?": its position (0 first).
+    # Recorded only, to measure how often the assistant asks and whether it needed to.
+    picked: int | None = Field(default=None, ge=0, le=50)
     upload_id: UUID | None = None
 
 

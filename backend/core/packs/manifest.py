@@ -11,6 +11,7 @@ TemplateId = Literal[
     "guided_playbook",
     "document_extraction",
     "checklist",
+    "conversation",
 ]
 
 

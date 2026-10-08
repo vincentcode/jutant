@@ -3,7 +3,8 @@ display_name: Bank Staff Assistant
 roles: [teller, customer_service, credit_officer, branch_manager]
 audiences: [staff, customer]
 caller_attributes: [branch]
-default_feature: policy_qa
+# Where a message no feature fits goes: talking with staff, not a document search for "hi".
+default_feature: conversation
 policy: packs.banking.policy.rules
 
 mcp_servers:
@@ -65,6 +66,20 @@ classifications:
 # argument. Patterns are case-sensitive; start one with (?i) to ignore case.
 
 features:
+  - id: conversation
+    template: conversation
+    title: General conversation
+    description: "Greetings, thanks, what the assistant can help with, or a request too unclear to act on: talk with staff and ask what they need."
+    prompt: prompts/conversation.md
+    route:
+      examples:
+        - "Hello, good morning"
+        - "Thanks, that's all for now"
+        - "What can you help me with?"
+        - "I'm not sure what I need"
+        # Asked to act: it only reads, so it says so and points to the form or procedure.
+        - "Send money from this account to another one for me"
+        - "Block this customer's card now"
   - id: policy_qa
     template: document_qa
     title: Policy and procedure Q&A

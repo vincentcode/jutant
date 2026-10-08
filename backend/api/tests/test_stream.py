@@ -180,7 +180,7 @@ async def test_a_procedure_reads_replies_pauses_for_questions_and_stops_when_ask
     await make_staff("ama")
     await sync_to_async(call_command)("load_pack_playbooks")
     replies = [
-        ModelReply("troubleshooting"),  # routing
+        ModelReply("troubleshooting"),  # routing: the model chooses
         ModelReply("blocked_card"),  # which procedure
         ModelReply("done"),  # "done" read as the step's answer
         ModelReply("hmm"),  # "blue" cannot be read...
@@ -196,10 +196,13 @@ async def test_a_procedure_reads_replies_pauses_for_questions_and_stops_when_ask
         assert (await client.http.get(procedure)).json()["step_order"] == 2
 
         unclear = await client.ask(conversation, text="blue")
-        assert (
-            "reply_unclear",
-            {"step_order": 2, "step_title": "Find the block reason"},
-        ) in unclear
+        [asked] = [data for name, data in unclear if name == "clarify"]
+        assert asked["choices"][0] == {
+            "kind": "answer",
+            "title": "My answer to step 2: Find the block reason",
+            "subject_id": None,
+            "feature_id": "troubleshooting",
+        }
 
         await client.ask(
             conversation,

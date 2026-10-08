@@ -58,6 +58,14 @@ class FeatureContext:
     # The pack's entity types: a prefetched record's values that are ids of these (a failure
     # code) let a second round of prefetch calls be made (the code's explanation).
     entity_types: tuple[EntityType, ...] = ()
+    # The kinds of help the caller's role has, as (feature id, title, description): what the
+    # assistant can say it does, and the features the conversation can pass a turn to.
+    offers: tuple[tuple[str, str, str], ...] = ()
+    # The feature staff's quick action names, if any: a hint, not a choice.
+    prefer: str | None = None
+    # What the assistant can and cannot do for this caller, from the pack (`core.features.
+    # catalogue`): so questions about it are answered from facts, not invented.
+    catalogue: str = ""
     # What searches read: the question, with the subject's document or procedure step, if any.
     search_text: str = ""
     # The subject's current entities (type -> id), for prefetch calls: TX-0002 named earlier.

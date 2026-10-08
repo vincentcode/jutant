@@ -1,6 +1,7 @@
 """Events streamed by `Orchestrator.ask`."""
 
 from dataclasses import dataclass
+from typing import Literal
 
 from core.types import Answer, PlaybookStep, ToolCall, ToolResult
 
@@ -50,21 +51,46 @@ class Failed:
 
 
 @dataclass(frozen=True)
-class SubjectUnclear:
-    """The message could be about an open subject or another of the same kind, and the model
-    could not tell: the client asks staff, and sends it again saying which."""
+class HandOver:
+    """The conversation passes the turn to a feature it chose: the orchestrator answers the
+    message with that feature instead. Never streamed to the client."""
 
-    subject_id: int
-    subject_title: str
+    feature_id: str
 
 
 @dataclass(frozen=True)
-class ReplyUnclear:
-    """A message typed during a procedure could not be read as an answer or a new question:
-    the client asks staff which they meant, and sends it again saying so."""
+class Choice:
+    """One thing a message might be, for staff to pick:
 
-    step_order: int
-    step_title: str
+    - `answer`: the reply to the step the procedure on top waits on (with its feature);
+    - `subject`: about an open subject (`subject_id`, with its feature);
+    - `resume`: back to the paused procedure;
+    - `feature`: a new subject for a kind of help (`feature_id`);
+    - `new`: something else, read afresh.
+    """
+
+    kind: Literal["answer", "subject", "resume", "feature", "new"]
+    title: str
+    subject_id: int | None = None
+    feature_id: str | None = None
+
+
+@dataclass(frozen=True)
+class Clarify:
+    """The assistant could not tell what the message is: staff pick one of `choices`, and the
+    client sends the message again saying which. The question is also the turn's text.
+    `reason`: why it asked, for measuring how often it asks and why (`ClarifyReason`)."""
+
+    question: str
+    choices: tuple[Choice, ...]
+    reason: str = ""
+
+
+# Why the assistant asked: the reading could not tell what the message is (`unread`), nor whether
+# it is about an open subject or another of its kind (`same_or_new`); the conversation model
+# named several kinds of help (`ask_which`), made no valid choice (`no_valid_call`), or talked
+# with staff, the kinds of help offered with its words (`talk`).
+ClarifyReason = Literal["unread", "same_or_new", "ask_which", "no_valid_call", "talk"]
 
 
 Event = (
@@ -75,6 +101,6 @@ Event = (
     | PlaybookStepShown
     | Completed
     | Failed
-    | ReplyUnclear
-    | SubjectUnclear
+    | Clarify
+    | HandOver
 )

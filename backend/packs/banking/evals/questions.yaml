@@ -333,3 +333,12 @@
   expect_contains: ["does not show"]
   expect_absent: ["which transfer", "no longer active"]
   expect_citation: true
+
+# Talking with staff: no tools, no sources, nothing about the bank stated.
+
+- id: q37
+  feature: conversation
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "Hi! What can you help me with?"
+  expect_absent: ["I could not find a source"]

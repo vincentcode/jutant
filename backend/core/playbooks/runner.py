@@ -147,6 +147,13 @@ class PlaybookRunner:
         if state is not None and not state.paused:
             await self.store.save_run(conversation_id, replace(state, paused=True))
 
+    async def unpause(self, conversation_id: UUID) -> None:
+        """The run is the conversation's subject again (a word in passing went above it), without
+        showing its step again."""
+        state = await self.store.get_run(conversation_id)
+        if state is not None and state.paused:
+            await self.store.save_run(conversation_id, replace(state, paused=False))
+
     async def resume(self, conversation_id: UUID) -> AsyncIterator[Event]:
         """Show the step the run waits on again."""
         state = await self.store.get_run(conversation_id)

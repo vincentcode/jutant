@@ -15,11 +15,10 @@ from core.context import DOCUMENT, ContextStack, entities_in, from_calls, names_
 from core.context.reader import Reading, certain, read, same_subject
 from core.context.stack import MAX_FRAMES, STALE_TURNS
 from core.events import (
+    Clarify,
     Completed,
     FeatureSelected,
     PlaybookStepShown,
-    ReplyUnclear,
-    SubjectUnclear,
     TextDelta,
 )
 from core.features.registry import FeatureRegistry
@@ -315,7 +314,12 @@ async def test_an_unclear_step_reply_asks_staff_and_keeps_nothing() -> None:
     await ask(rig, conversation, "card is blocked", "troubleshooting")
     before = (await stack_of(rig, conversation)).as_dict()
     events = await ask(rig, conversation, "blue")
-    assert any(isinstance(e, ReplyUnclear) and e.step_order == 1 for e in events)
+    [asked] = [e for e in events if isinstance(e, Clarify)]
+    kinds = [c.kind for c in asked.choices]
+    assert kinds[0] == "answer" and asked.choices[0].title == "My answer to step 1: Verify"
+    offered = [c.feature_id for c in asked.choices if c.kind == "feature"]
+    assert "troubleshooting" not in offered  # one procedure at a time
+    assert kinds[-1] == "new" and texts(events) == [asked.question]
     assert (await stack_of(rig, conversation)).as_dict() == before
 
 
@@ -518,14 +522,48 @@ async def test_when_neither_can_tell_staff_are_asked_which_subject() -> None:
     await ask(rig, conversation, "check TX-0002", "transaction_lookup")
     before = (await stack_of(rig, conversation)).as_dict()
     events = await ask(rig, conversation, "why did it fail?")
-    [unclear] = [e for e in events if isinstance(e, SubjectUnclear)]
-    assert texts(events) == [f"Is this about {unclear.subject_title}, or something new?"]
+    [asked] = [e for e in events if isinstance(e, Clarify)]
+    same, other = asked.choices
+    assert (same.kind, other.kind, other.feature_id) == ("subject", "feature", "transaction_lookup")
+    assert texts(events) == [asked.question]
     assert (await stack_of(rig, conversation)).as_dict() == before  # nothing kept
 
     answered = await ask(
-        rig, conversation, "why did it fail?", reply_as="continue", subject_id=unclear.subject_id
+        rig, conversation, "why did it fail?", reply_as="continue", subject_id=same.subject_id
     )
     assert answered[-1].answer.text == "Account closed." and statuses(rig) == ["TX-0002"] * 2
+
+
+async def test_an_unread_message_offers_the_subjects_and_kinds_of_help() -> None:
+    rig, _, conversation = await bank(ModelReply("It failed."), ModelReply("hmm"), ModelReply("eh"))
+    await ask(rig, conversation, "check TX-0002", "transaction_lookup")
+    before = (await stack_of(rig, conversation)).as_dict()
+    events = await ask(rig, conversation, "and the other thing?")
+    [asked] = [e for e in events if isinstance(e, Clarify)]
+    first, *rest = asked.choices
+    assert first.kind == "subject" and "TX-0002" in first.title
+    assert {c.kind for c in rest} == {"feature", "new"}  # not routed on a guess
+    assert (await stack_of(rig, conversation)).as_dict() == before
+
+
+async def test_a_picked_message_is_shown_once() -> None:
+    rig, _, conversation = await bank(
+        ModelReply("It failed."), ModelReply("hmm"), ModelReply("eh"), ModelReply("Closed.")
+    )
+    await ask(rig, conversation, "check TX-0002", "transaction_lookup")
+    events = await ask(rig, conversation, "and why?")
+    [asked] = [e for e in events if isinstance(e, Clarify)]
+    first = asked.choices[0]
+    await ask(
+        rig, conversation, "and why?", reply_as="continue", subject_id=first.subject_id, picked=0
+    )
+    stored = [(m.role, m.content) for m in await rig.conversations.recent_messages(conversation, 9)]
+    assert [m for m in stored if m == ("user", "and why?")] == [("user", "and why?")]
+    assert stored[-3:] == [
+        ("user", "and why?"),
+        ("assistant", asked.question),
+        ("assistant", "Closed."),
+    ]
 
 
 async def test_no_second_procedure_starts_while_one_is_open() -> None:
@@ -601,3 +639,14 @@ async def test_a_checklist_reads_the_documents_too() -> None:
     await ask(rig, conversation, "who signs the mandate?", "forms")
     assert rig.tools.calls[0].call.arguments == {"query": "who signs the mandate?"}
     assert ChecklistTemplate.id == "checklist"
+
+
+async def test_a_kind_of_help_picked_to_start_asks_for_what_it_needs() -> None:
+    rig, model, conversation = await bank()
+    events = await ask(
+        rig, conversation, "Transaction lookup", "transaction_lookup", reply_as="start", picked=1
+    )
+    assert texts(events) == [WHICH_TRANSFER] and model.calls == []  # its ask_for, no model
+    assert (await stack_of(rig, conversation)).top.feature_id == "transaction_lookup"
+    stored = [(m.role, m.content) for m in await rig.conversations.recent_messages(conversation, 5)]
+    assert stored == [("user", "Transaction lookup"), ("assistant", WHICH_TRANSFER)]

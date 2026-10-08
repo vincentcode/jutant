@@ -174,3 +174,35 @@ def test_keyword_match_folds_plurals() -> None:
     options = [Option("a", "Recent transfers and payments"), Option("b", "Bank policy")]
     assert best_keyword_match("a transfer that failed", options) == "a"
     assert best_keyword_match("weather today", options) is None
+
+
+async def test_when_not_guessing_the_model_still_chooses() -> None:
+    r, _ = router("transaction_lookup")
+    route = await r.route(teller(), "Why did the transfer fail?", guess=False)
+    assert (route.feature.id, route.by) == ("transaction_lookup", "model")
+
+
+async def test_when_not_guessing_and_the_model_cannot_choose_it_is_unsure() -> None:
+    r, _ = router("I think it is about transfers, probably the lookup one")
+    route = await r.route(teller(), "Why did the transfer fail?", guess=False)
+    assert (route.feature.id, route.by) == ("policy_qa", "unsure")  # not the keywords' pick
+
+
+async def test_when_not_guessing_a_pattern_still_decides() -> None:
+    features = with_route("transaction_lookup", patterns=[r"TX-\d+"])
+    r, _ = router(features=features)
+    route = await r.route(teller(), "What about TX-0002?", guess=False)
+    assert (route.feature.id, route.by) == ("transaction_lookup", "pattern")
+
+
+async def test_when_not_guessing_a_pattern_gives_way_to_the_default_by_meaning() -> None:
+    features = with_route("transaction_lookup", patterns=[r"TX-\d+"], examples=["transfer"])
+    features = [
+        replace(f, route_examples=("card",)) if f.id == "policy_qa" else f for f in features
+    ]
+    r, model = router(features=features)
+    r.model = model = TopicModel()
+    route = await r.route(teller(), "block the card on TX-0002", model, guess=False)
+    assert (route.feature.id, route.by) == ("policy_qa", "unsure")  # the default here
+    sure = await r.route(teller(), "the transfer TX-0002", model, guess=False)
+    assert (sure.feature.id, sure.by) == ("transaction_lookup", "pattern")
