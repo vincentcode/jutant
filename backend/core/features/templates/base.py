@@ -13,7 +13,7 @@ from uuid import UUID
 from core.context.entities import values_in
 from core.errors import InvalidToolCall, ModelUnavailable, UnknownTool
 from core.events import Event, Failed, TextDelta, ToolFinished, ToolStarted
-from core.features.prefetch import planned_calls
+from core.features.prefetch import chosen_calls, planned_calls
 from core.observability import Trace
 from core.ports import AuditSink, ModelProvider, PlaybookStore
 from core.types import (
@@ -88,8 +88,9 @@ async def tool_loop(
 ) -> AsyncIterator[Event]:
     """Model, tool calls, model again, until the model answers in text.
 
-    The feature's prefetch calls whose arguments the question (or the subject) supplies are
-    made first, in code, with any `extra_calls` the template adds; then a second round, for
+    The feature's prefetch calls whose arguments the question (or the subject) supplies, or
+    the model picks from the pack's values, are made first, in code, with any `extra_calls`
+    the template adds; then a second round, for
     calls that only the fetched records make possible (a record's failure code, looked up in
     the codes' document). The model starts with their results. The model sees only the routed
     feature's tools. Every call goes through the gateway. A failed call of the model's is
@@ -111,8 +112,9 @@ async def tool_loop(
     messages = list(ctx.messages)
     tools = ctx.gateway.catalog.specs_for(ctx.feature.tools)
     made: set[tuple[str, str]] = set()
+    chosen = await chosen_calls(ctx.model, ctx.feature, ctx.question, ctx.entities)
     rounds = (
-        lambda: [*planned_calls(ctx.feature, ctx.lookup, ctx.entities), *extra_calls],
+        lambda: [*planned_calls(ctx.feature, ctx.lookup, ctx.entities), *chosen, *extra_calls],
         lambda: planned_calls(ctx.feature, ctx.lookup, {**_pointed_to(ctx), **ctx.entities}),
     )
     for plan in rounds:

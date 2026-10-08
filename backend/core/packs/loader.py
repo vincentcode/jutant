@@ -82,7 +82,9 @@ def load_pack(path: str | Path) -> Pack:
                 Prefetch(
                     p.tool,
                     {
-                        name: ArgumentSource(a.question, a.match, a.value, a.entity)
+                        name: ArgumentSource(
+                            a.question, a.match, a.value, a.entity, tuple(a.choose.items())
+                        )
                         for name, a in p.arguments.items()
                     },
                 )

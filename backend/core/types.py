@@ -76,6 +76,9 @@ class ArgumentSource:
     match: str | None = None  # a regular expression: its first group (or the whole match)
     value: Any = None  # a fixed value
     entity: str | None = None  # the conversation's current entity of this type (a transfer)
+    # The values it can take, as (value, what it means): the model picks one for the question,
+    # or none, and the call is made in code (a request type: joint_account_opening).
+    choose: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)

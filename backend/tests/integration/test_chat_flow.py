@@ -178,7 +178,7 @@ async def test_code_explainer_looks_up_the_code() -> None:
 async def test_form_guidance_lists_what_a_request_needs() -> None:
     await make_staff("efua", role="customer_service")
     turn = [
-        calls("services.get_requirements", request_type="joint account opening"),
+        ModelReply("joint_account_opening"),  # the request type, picked from the pack's list
         ModelReply("- Account opening form\n- Joint mandate form\n- All holders sign"),
     ]
     async with api(*turn) as client:
@@ -186,6 +186,7 @@ async def test_form_guidance_lists_what_a_request_needs() -> None:
         events = await client.ask(
             await client.conversation(), text="Joint account opening?", feature_id="form_guidance"
         )
+    assert "services.get_requirements" in tools_used(events)  # fetched in code
     assert answer(events)["citations"] == [
         {"kind": "record", "title": "Requirements", "locator": "joint_account_opening"}
     ]

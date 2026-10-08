@@ -160,6 +160,14 @@ features:
     description: "Which application forms, signatures and approvals a request needs before it can be submitted."
     prompt: prompts/form_guidance.md
     tools: [services.get_requirements, documents.search]
+    # The request types the bank's catalogue has requirement records for: the model picks the
+    # one a question is about (or none), and the record is fetched in code.
+    prefetch:
+      - tool: services.get_requirements
+        arguments:
+          request_type:
+            choose:
+              joint_account_opening: "Opening an account held by two or more people"
     route:
       examples:
         - "What paperwork is needed to add a signatory to an account?"

@@ -34,12 +34,20 @@ class ArgumentDef(BaseModel):
     match: str | None = None
     value: Any = None
     entity: str | None = None  # an entity type the pack declares: the conversation's current one
+    # value -> what it means: the model picks the one the question is about, or none
+    choose: dict[str, str] = {}
 
     @model_validator(mode="after")
     def _exactly_one(self) -> "ArgumentDef":
-        given = (self.question, self.match is not None, self.value is not None, self.entity)
+        given = (
+            self.question,
+            self.match is not None,
+            self.value is not None,
+            self.entity,
+            self.choose,
+        )
         if sum(bool(g) for g in given) != 1:
-            raise ValueError("set exactly one of question, match, value or entity")
+            raise ValueError("set exactly one of question, match, value, entity or choose")
         return self
 
 
