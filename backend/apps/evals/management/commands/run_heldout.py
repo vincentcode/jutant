@@ -15,6 +15,21 @@ played. The caller is the file's `default_staff_context`, or the item's `staff`,
 Answers are not scored automatically: an item's expected phrases are shown as hints next to
 the answers (found or not), and the person grading judges by meaning. Writes <output>.json
 (everything) and <output>.md (for reading).
+
+Whether the assistant asks when it should is scored, for messages with a label:
+
+    messages:
+      - text: "Why did TX-0002 fail?"
+        expect: transaction_lookup     # the feature that should answer
+      - text: "and when does the money come back?"
+        expect: transaction_lookup
+        subject: same                  # optional: same (an open subject) or new
+      - text: "what about the other one?"
+        expect: ask                    # even a person could not tell: it should ask
+        then: product_lookup           # optional: what staff would pick, to go on
+
+When the assistant asks, the labelled choice is picked as staff would. A one-message item takes
+its label from the item (`expect`, `subject`, `then`). See `core.evals.labels`.
 """
 
 import asyncio
@@ -26,10 +41,9 @@ import yaml
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 
 from config.container import build_runtime
-from core.evals.transcript import Transcript, replay
+from core.evals import labels as label_scoring
+from core.evals.transcript import HELDOUT_CALLER_ID, Label, Transcript, replay
 from core.types import Caller
-
-CALLER_ID = "heldout"
 
 
 class Command(BaseCommand):
@@ -57,8 +71,10 @@ class Command(BaseCommand):
             {"item": item, "attempts": [t.as_dict() for t in transcripts[item["id"]]]}
             for item in items
         ]
-        out.with_suffix(".json").write_text(json.dumps(report, indent=2), encoding="utf-8")
-        out.with_suffix(".md").write_text(markdown(report), encoding="utf-8")
+        asking = label_scoring.score(t for done in transcripts.values() for t in done)
+        everything = {"asking": asking.as_dict(), "items": report}
+        out.with_suffix(".json").write_text(json.dumps(everything, indent=2), encoding="utf-8")
+        out.with_suffix(".md").write_text(markdown(report, asking), encoding="utf-8")
         self.stdout.write(f"Wrote {out.with_suffix('.md')} and {out.with_suffix('.json')}")
 
     async def _run(
@@ -71,14 +87,19 @@ class Command(BaseCommand):
             for item in items:
                 staff = {**default, **(item.get("staff") or {})}
                 caller = Caller(
-                    CALLER_ID,
+                    HELDOUT_CALLER_ID,
                     role or staff.get("role", "teller"),
                     "staff",
                     {"branch": staff.get("branch", "")},
                 )
                 for attempt in range(1, repeat + 1):
                     transcript = await replay(
-                        runtime.orchestrator, caller, staff_messages(item), item["id"], attempt
+                        runtime.orchestrator,
+                        caller,
+                        staff_messages(item),
+                        item["id"],
+                        attempt,
+                        labels(item),
                     )
                     done.setdefault(item["id"], []).append(transcript)
                     seconds = sum(t.seconds for t in transcript.turns)
@@ -128,6 +149,25 @@ def staff_messages(item: dict[str, Any]) -> list[str]:
     return said
 
 
+def labels(item: dict[str, Any]) -> list[Label | None]:
+    """Each staff message's label, if it has one (`expect`)."""
+
+    def label(block: Any) -> Label | None:
+        if not isinstance(block, dict) or not block.get("expect"):
+            return None
+        return Label(
+            str(block["expect"]), str(block.get("subject") or ""), str(block.get("then") or "")
+        )
+
+    if "message" in item:
+        return [label(item)]
+    return [
+        label(m)
+        for m in item["messages"]
+        if isinstance(m, str) or m.get("role", "staff") != "assistant"
+    ]
+
+
 def hints(item: dict[str, Any]) -> dict[int, list[str]]:
     """Expected phrases by staff-message index, where the item says which message they are for."""
     expected = item.get("expected") or {}
@@ -155,8 +195,10 @@ def hints(item: dict[str, Any]) -> dict[int, list[str]]:
     return found
 
 
-def markdown(report: list[dict[str, Any]]) -> str:
+def markdown(report: list[dict[str, Any]], asking: label_scoring.LabelScore) -> str:
     out = ["# Held-out transcripts", ""]
+    if asking.clear or asking.unclear:
+        out += label_scoring.render(asking)
     for entry in report:
         item = entry["item"]
         expected = hints(item)
@@ -185,6 +227,14 @@ def markdown(report: list[dict[str, Any]]) -> str:
                 out.append(f"   - Routed: {route}")
                 if turn["reply_read_as"]:
                     out.append(f"   - Read as: {turn['reply_read_as']}")
+                if turn["asked"]:
+                    picked = f"; picked {turn['picked']}" if turn["picked"] else ""
+                    out.append(
+                        f"   - Asked ({turn['ask_reason']}): {'; '.join(turn['asked'])}{picked}"
+                    )
+                if turn["expect"]:
+                    subject = f" ({turn['expect_subject']})" if turn["expect_subject"] else ""
+                    out.append(f"   - Label: {turn['expect']}{subject}")
                 for tool in turn["tools"]:
                     status = "ok" if tool.get("ok") else tool.get("error")
                     out.append(f"   - Tool: `{tool['name']}` {tool['arguments']} → {status}")
