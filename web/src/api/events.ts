@@ -41,11 +41,18 @@ export interface Answer {
   citations: Citation[]
 }
 
+/** One thing a message might be, for staff to pick when the assistant could not tell. */
+export interface Choice {
+  kind: 'answer' | 'subject' | 'resume' | 'feature' | 'new'
+  title: string
+  subject_id: number | null
+  feature_id: string | null
+}
+
 export type StreamEvent =
   | { event: 'queued'; data: { position: number } }
   | { event: 'feature_selected'; data: { feature_id: string; switched_from?: string | null } }
-  | { event: 'reply_unclear'; data: { step_order: number; step_title: string } }
-  | { event: 'subject_unclear'; data: { subject_id: number; subject_title: string } }
+  | { event: 'clarify'; data: { question: string; reason: string; choices: Choice[] } }
   | { event: 'tool_started'; data: { call: ToolCall; label?: string | null } }
   | { event: 'tool_finished'; data: { result: ToolResult } }
   | { event: 'text_delta'; data: { text: string } }

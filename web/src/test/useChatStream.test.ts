@@ -74,25 +74,24 @@ describe('chatStreamReducer', () => {
     expect(kept.switchedFrom).toBeUndefined()
   })
 
-  it('keeps an unclear reply until the next question', () => {
+  it('keeps the choices offered until the next question', () => {
     let state = chatStreamReducer(initialStreamState, { event: 'start', data: { question: 'blue', at: 1 } })
+    const answer = { kind: 'answer' as const, title: 'My answer to step 2: Find the block reason', subject_id: null, feature_id: null }
     state = chatStreamReducer(state, {
-      event: 'reply_unclear',
-      data: { step_order: 2, step_title: 'Find the block reason' },
+      event: 'clarify',
+      data: { question: 'Which is it?', reason: 'unread', choices: [answer] },
     })
-    expect(state.unclear).toEqual({ stepOrder: 2, stepTitle: 'Find the block reason' })
+    expect(state.choices).toEqual([answer])
+    expect(state.clarifyReason).toBe('unread')
     state = chatStreamReducer(state, { event: 'start', data: { question: 'blue', at: 2 } })
-    expect(state.unclear).toBeUndefined()
+    expect(state.choices).toBeUndefined()
   })
 
-  it('keeps the subject question until the next question', () => {
-    let state = chatStreamReducer(initialStreamState, { event: 'start', data: { question: 'why?', at: 1 } })
-    state = chatStreamReducer(state, {
-      event: 'subject_unclear',
-      data: { subject_id: 3, subject_title: 'Transaction lookup: transfer TX-0002' },
+  it('marks a message sent again after a pick', () => {
+    const state = chatStreamReducer(initialStreamState, {
+      event: 'start',
+      data: { question: 'blue', at: 3, repeat: true },
     })
-    expect(state.subjectUnclear).toEqual({ subjectId: 3, subjectTitle: 'Transaction lookup: transfer TX-0002' })
-    state = chatStreamReducer(state, { event: 'start', data: { question: 'why?', at: 2 } })
-    expect(state.subjectUnclear).toBeUndefined()
+    expect(state.repeat).toBe(true)
   })
 })

@@ -3,7 +3,7 @@
 
 import { useCallback, useReducer, useRef } from 'react'
 import { ApiError } from '../api/client'
-import type { Citation, ShownStep, StreamEvent, ToolCall, ToolResult } from '../api/events'
+import type { Choice, Citation, ShownStep, StreamEvent, ToolCall, ToolResult } from '../api/events'
 import { ask, type AskBody } from '../api/stream'
 
 export interface ToolActivityItem {
@@ -15,12 +15,13 @@ export interface ToolActivityItem {
 export interface ChatStreamState {
   status: 'idle' | 'sending' | 'queued' | 'streaming' | 'done' | 'failed' | 'stopped'
   question?: string
+  repeat?: boolean // the question sent again after a pick: already shown, not shown twice
   startedAt?: number // when the question was sent, for the time shown while waiting
   queuePosition?: number
   featureId?: string
   switchedFrom?: string // the quick action staff had chosen, when the question was for another feature
-  unclear?: { stepOrder: number; stepTitle: string } // asked during a procedure: answer or question?
-  subjectUnclear?: { subjectId: number; subjectTitle: string } // asked: about this subject, or new?
+  choices?: Choice[] // the assistant could not tell what the message is: staff pick one
+  clarifyReason?: string // why it asked: `talk` when the assistant talked, the kinds of help offered with it
   text: string
   tools: ToolActivityItem[]
   citations: Citation[]
@@ -31,7 +32,7 @@ export interface ChatStreamState {
 
 export type ChatAction =
   | StreamEvent
-  | { event: 'start'; data: { question: string; at: number } }
+  | { event: 'start'; data: { question: string; at: number; repeat?: boolean } }
   | { event: 'error'; data: { message: string } }
   | { event: 'stopped' }
   | { event: 'reset' }
@@ -49,7 +50,13 @@ export function chatStreamReducer(state: ChatStreamState, action: ChatAction): C
     case 'reset':
       return initialStreamState
     case 'start':
-      return { ...initialStreamState, status: 'sending', question: action.data.question, startedAt: action.data.at }
+      return {
+        ...initialStreamState,
+        status: 'sending',
+        question: action.data.question,
+        startedAt: action.data.at,
+        repeat: action.data.repeat,
+      }
     case 'queued':
       return { ...state, status: 'queued', queuePosition: action.data.position }
     case 'feature_selected':
@@ -59,13 +66,8 @@ export function chatStreamReducer(state: ChatStreamState, action: ChatAction): C
         featureId: action.data.feature_id,
         switchedFrom: action.data.switched_from ?? undefined,
       }
-    case 'subject_unclear':
-      return {
-        ...state,
-        subjectUnclear: { subjectId: action.data.subject_id, subjectTitle: action.data.subject_title },
-      }
-    case 'reply_unclear':
-      return { ...state, unclear: { stepOrder: action.data.step_order, stepTitle: action.data.step_title } }
+    case 'clarify':
+      return { ...state, choices: action.data.choices, clarifyReason: action.data.reason }
     case 'tool_started':
       return {
         ...state,
@@ -105,11 +107,11 @@ export function useChatStream(onSettled: (conversationId: string) => void) {
   const controller = useRef<AbortController | null>(null)
 
   const send = useCallback(
-    async (conversationId: string, body: AskBody) => {
+    async (conversationId: string, body: AskBody, repeat = false) => {
       controller.current?.abort()
       const current = new AbortController()
       controller.current = current
-      dispatch({ event: 'start', data: { question: body.text, at: Date.now() } })
+      dispatch({ event: 'start', data: { question: body.text, at: Date.now(), repeat } })
       try {
         for await (const event of ask(conversationId, body, current.signal)) dispatch(event)
       } catch (error) {

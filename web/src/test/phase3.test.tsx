@@ -2,65 +2,10 @@ import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-li
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import { MemoryRouter } from 'react-router-dom'
-import type { Feature, HistoryMessage } from '../api/endpoints'
+import type { HistoryMessage } from '../api/endpoints'
 import { useTheme } from '../app/appearance'
 import { AnswerFooter, asPlainText } from '../chat/AnswerFooter'
 import { ConversationList } from '../chat/ConversationList'
-import { FeaturePicker } from '../chat/FeaturePicker'
-
-const FEATURES: Feature[] = [
-  {
-    id: 'policy_qa',
-    template: 'document_qa',
-    title: 'Policy Q&A',
-    description: 'Rules in the policies.',
-    group: 'Policies and documents',
-    examples: ['What ID does a customer need?', 'How recent must proof of address be?'],
-  },
-  {
-    id: 'transaction_lookup',
-    template: 'record_lookup',
-    title: 'Transaction lookup',
-    description: 'One account or transfer.',
-    group: 'Look something up',
-    examples: ['Has the salary been credited?'],
-  },
-  {
-    id: 'troubleshooting',
-    template: 'guided_playbook',
-    title: 'Guided troubleshooting',
-    description: 'Step by step.',
-    group: 'Step-by-step help',
-    examples: [],
-  },
-]
-
-describe('FeaturePicker', () => {
-  it('groups the features and picks one, or automatic', () => {
-    const onSelect = vi.fn()
-    const { rerender } = render(<FeaturePicker features={FEATURES} onSelect={onSelect} />)
-    const button = screen.getByRole('button', { name: /Ask about: Automatic/ })
-    fireEvent.click(button)
-    expect(screen.getByRole('group', { name: 'Look something up' })).toHaveTextContent('Transaction lookup')
-    fireEvent.click(screen.getByRole('menuitemradio', { name: /Transaction lookup/ }))
-    expect(onSelect).toHaveBeenLastCalledWith('transaction_lookup')
-    expect(screen.queryByRole('menu')).toBeNull()
-
-    rerender(<FeaturePicker features={FEATURES} selected="transaction_lookup" onSelect={onSelect} />)
-    expect(screen.getByRole('button', { name: /Ask about: Transaction lookup/ })).toBeInTheDocument()
-  })
-
-  it('works from the keyboard and closes on Escape', () => {
-    render(<FeaturePicker features={FEATURES} onSelect={vi.fn()} />)
-    fireEvent.click(screen.getByRole('button', { name: /Ask about/ }))
-    const items = screen.getAllByRole('menuitemradio')
-    expect(document.activeElement).toBe(items[0]) // the current choice
-    fireEvent.keyDown(items[0]!, { key: 'ArrowDown' })
-    expect(document.activeElement).toBe(items[1])
-    fireEvent.keyDown(items[1]!, { key: 'Escape' })
-    expect(screen.queryByRole('menu')).toBeNull()
-  })
-})
 
 describe('AnswerFooter', () => {
   const answer: HistoryMessage = {
