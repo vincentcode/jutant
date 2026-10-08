@@ -1,6 +1,6 @@
 """What the assistant can and cannot do, from the pack: for the conversation to answer from."""
 
-from core.features.catalogue import READ_ONLY, catalogue
+from core.features.catalogue import READ_ONLY, USING, catalogue
 from tests.builders import FEATURES
 
 LABELS = {"transactions.get_status": "the transfer", "documents.search": "the bank's documents"}
@@ -11,7 +11,12 @@ def test_the_catalogue_lists_the_roles_help_what_it_looks_at_and_what_it_cannot(
     assert "- Transaction lookup: Account activity and why a transfer failed." in text
     assert "It looks at the transfer." in text
     assert "Not for this staff member's role: Customer 360 (for branch manager)." in text
-    assert text.endswith(READ_ONLY)
+    assert READ_ONLY in text and text.endswith(USING)  # and how to use the assistant
+
+
+def test_the_platforms_sentences_use_no_business_words() -> None:
+    words = {"account", "payment", "transfer", "customer", "branch", "claim", "store"}
+    assert not words & set((READ_ONLY + " " + USING).lower().replace(".", " ").split())
 
 
 def test_a_role_with_every_kind_of_help_has_no_others_and_the_talk_is_left_out() -> None:

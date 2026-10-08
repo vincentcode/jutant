@@ -3,7 +3,10 @@
 Given to the conversation, so "what tools do you have?", "can you check balances?" or "why
 can't I see customer summaries?" are answered from the pack, not invented: the kinds of help
 the caller's role has, what each looks at (the pack's tool labels), the kinds other roles have,
-and that the assistant only reads. Assembled in code; short, for a small model.
+and that the assistant only reads. And how to use the assistant ("how do I attach a file?"):
+the platform's own screen, the same for every pack. Assembled in code; short, for a small model.
+Every sentence here is the platform's, so none uses a business's words: a pack's own system
+prompt adds its examples.
 """
 
 from collections.abc import Iterable, Mapping
@@ -11,8 +14,18 @@ from collections.abc import Iterable, Mapping
 from core.types import Feature
 
 READ_ONLY = (
-    "You only read records and documents: you cannot change anything, make a payment or act on "
-    "an account. For a change, say which kind of help shows its form, approvals or steps."
+    "You only read records and documents: you cannot change anything or carry out an action "
+    "for staff. For a change, say which kind of help shows its form, approvals or steps."
+)
+# How staff use the assistant: the web client's own controls, by the names it shows.
+USING = (
+    "How staff use you: they type a question; they choose nothing first, you work out which "
+    "kind of help fits and ask when unsure. To read a file, they attach it with the paperclip "
+    "(Attach a document), then ask. A procedure shows one step at a time: they answer on its "
+    "step card; Stop ends it, Resume continues a paused one. To go back to an earlier subject, "
+    "they name it. Answers show their sources and can be rated with the thumbs. Past "
+    "conversations are under Conversations, documents under Knowledge, and New conversation "
+    "starts afresh."
 )
 
 
@@ -38,7 +51,7 @@ def catalogue(
             + "; ".join(f"{f.title} (for {_roles(f.roles)})" for f in others)
             + "."
         )
-    lines.append(READ_ONLY)
+    lines += [READ_ONLY, USING]
     return "\n".join(lines)
 
 
