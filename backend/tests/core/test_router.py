@@ -206,3 +206,11 @@ async def test_when_not_guessing_a_pattern_gives_way_to_the_default_by_meaning()
     assert (route.feature.id, route.by) == ("policy_qa", "unsure")  # the default here
     sure = await r.route(teller(), "the transfer TX-0002", model, guess=False)
     assert (sure.feature.id, sure.by) == ("transaction_lookup", "pattern")
+
+
+def test_a_reply_naming_an_options_place_is_that_option() -> None:
+    ids = ["thanks", "greeting", "request"]
+    assert parse_choice("2", ids) == "greeting"
+    assert parse_choice(" 1. ", ids) == "thanks"
+    assert parse_choice("4", ids) is None and parse_choice("0", ids) is None
+    assert parse_choice("2", ["1", "2"]) == "2"  # an id wins over a place

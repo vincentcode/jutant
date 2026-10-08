@@ -16,6 +16,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+OFFERED = "talk"  # the kinds of help offered with the conversation's words, not a question
 # Decided by staff, not guessed: their reply_as, a locked feature, a pick, the first message.
 STAFF = frozenset({"staff", "locked", "client", "first"})
 
@@ -36,7 +37,9 @@ class TurnReport:
 
     @property
     def asked_total(self) -> int:
-        return sum(self.asked.values())
+        """Times the assistant asked what a message is: not the kinds of help it offers while
+        talking (a greeting's buttons are not a question about the message)."""
+        return sum(n for reason, n in self.asked.items() if reason != OFFERED)
 
     @property
     def picks(self) -> int:
@@ -100,7 +103,10 @@ def render(report: TurnReport) -> str:
         "Asking",
         f"  picker shown        {_of(report.asked_total, turns, 'messages')}",
     ]
-    lines += [f"    {reason:<18}{n}" for reason, n in report.asked.most_common()]
+    lines += [
+        f"    {reason:<18}{n}" for reason, n in report.asked.most_common() if reason != OFFERED
+    ]
+    lines.append(f"  help offered        {report.asked[OFFERED]} (with talk: not asking)")
     lines += [
         f"  picked              {_of(report.picks, asked, 'pickers')}",
         f"    first choice      {_of(report.picked_first, picks, 'picks')}",

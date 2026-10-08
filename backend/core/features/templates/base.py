@@ -74,6 +74,9 @@ class FeatureContext:
     # What the assistant can and cannot do for this caller, from the pack (`core.features.
     # catalogue`): so questions about it are answered from facts, not invented.
     catalogue: str = ""
+    # Whether the conversation has subjects open besides this turn's: the conversation offers
+    # the kinds of help only when none is, at the start or once everything is closed.
+    subjects_open: bool = False
     # What searches read: the question, with the subject's document or procedure step, if any.
     search_text: str = ""
     # The subject's current entities (type -> id), for prefetch calls: TX-0002 named earlier.

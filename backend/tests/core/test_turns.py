@@ -54,3 +54,14 @@ def test_a_staff_decision_is_not_a_quick_return() -> None:
 def test_the_report_reads_without_any_records() -> None:
     text = render(summarise([]))
     assert "picker shown        0 (0% of messages)" in text
+
+
+def test_help_offered_while_talking_is_not_asking() -> None:
+    report = summarise(
+        [
+            asked("good morning"),
+            ("c1", "clarify_shown", {"reason": "talk", "choices": CHOICES}),
+        ]
+    )
+    assert report.asked_total == 0 and report.asked == {"talk": 1}
+    assert "help offered        1 (with talk: not asking)" in render(report)

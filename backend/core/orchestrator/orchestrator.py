@@ -50,7 +50,7 @@ from core.context import (
     names_in,
     values_in,
 )
-from core.context.reader import Reading, ReplyAs, certain, read, same_subject
+from core.context.reader import Reading, ReplyAs, certain, continues, read, same_subject
 from core.errors import ModelUnavailable, PolicyDenied
 from core.events import (
     Choice,
@@ -233,6 +233,8 @@ class Orchestrator:
         waiting = await self.runner.current(conversation_id) if top and top.procedure else None
         step = waiting[1] if waiting else None
         reading = certain(stack, text, mentioned, reply_as, feature_id, subject_id, step)
+        if reading is None and not mentioned and stack.top is not None and not stack.top.procedure:
+            reading = await self._continues(text, stack, turn, timer)
         if reading is None:
             reading = await self._read(caller, conversation_id, text, stack, turn, timer)
             if reading is not None and not mentioned:
@@ -528,7 +530,7 @@ class Orchestrator:
         if await self.playbooks.get_run(conversation_id) is None:
             stack.drop(frame.id)  # finished or stopped
         elif answer is not None and (kept := stack.get(frame.id)) is not None:
-            looked_at = from_calls(answer.tool_calls, answer.citations, self.entity_types)
+            looked_at = from_calls(answer.tool_calls, answer.citations, self.entity_types, results)
             stack.put(
                 kept.with_entities(looked_at)
                 .with_related(_pointed_to(results, self.entity_types))
@@ -600,6 +602,7 @@ class Orchestrator:
                     and not (open_procedure and f.template == PROCEDURE_TEMPLATE)
                 ),
                 prefer=switched,
+                subjects_open=any(f.id != frame.id for f in stack.frames),
                 catalogue=catalogue(
                     self.registry, caller.role, self.tool_labels, _passing_ids(self)
                 )
@@ -647,7 +650,7 @@ class Orchestrator:
                 stack.learn(names_in(result.data, self.entity_types))
         kept = stack.get(frame.id) or frame
         if answer is not None:
-            found = from_calls(answer.tool_calls, answer.citations, self.entity_types)
+            found = from_calls(answer.tool_calls, answer.citations, self.entity_types, results)
             kept = (
                 kept.with_entities(found)
                 .with_related(_pointed_to(results, self.entity_types))
@@ -784,6 +787,20 @@ class Orchestrator:
             and not planned_calls(feature, text, {})
             and planned_calls(feature, text, frame.entities)
         )
+
+    async def _continues(
+        self, text: str, stack: ContextStack, turn: Trace, timer: TurnTimer
+    ) -> Reading | None:
+        """A message naming nothing: more about the subject on top? A two-way question first;
+        None (something else, or unclear) leaves it to the full reading."""
+        top = stack.top
+        assert top is not None
+        described = self._describe(top, None, stack)  # "Transaction lookup: transfer TX-0002"
+        subject = described.split(": ", 1)[-1]  # what it is about: "transfer TX-0002"
+        with turn.span("continues?", "chain", subject=subject) as span:
+            more = await continues(TimedModel(TracedModel(self.model, span), timer), text, subject)
+            span.set(more=more)
+        return Reading("continue", top.id, by="model:continues") if more else None
 
     async def _which_subject(
         self,

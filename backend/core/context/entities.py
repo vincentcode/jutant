@@ -13,7 +13,7 @@ import re
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
-from core.types import Citation, EntityType, ToolCall
+from core.types import Citation, EntityType, ToolCall, ToolResult
 
 DOCUMENT = "document"  # a document an answer cited, by title: what a follow-up searches with
 
@@ -86,18 +86,37 @@ def _records(data: Any) -> list[dict[str, Any]]:
 
 
 def from_calls(
-    calls: Iterable[ToolCall], citations: Iterable[Citation], types: Sequence[EntityType]
+    calls: Iterable[ToolCall],
+    citations: Iterable[Citation],
+    types: Sequence[EntityType],
+    results: Iterable[ToolResult] = (),
 ) -> dict[str, str]:
     """The entities a turn looked at: in its tool calls' arguments, then in its record sources
-    (a later one replaces an earlier one of the same type), and the last document it cited."""
+    (a later one replaces an earlier one of the same type), and the last document it cited.
+
+    When the turn looked a record up, the documents it searched beside it are background (the
+    explanation of the record's failure code), not what the subject is about: their calls'
+    arguments and their titles are left out. Otherwise "why was it not reversed?" is asked
+    about "the KYC policy, transfer TX-0002 and error code E51", and is not recognised as
+    being about the transfer. `results` (matched to `calls` by id) tells which calls those are.
+    """
+    citations = list(citations)
+    on_record = any(c.kind == "record" for c in citations)
+    background = {
+        r.call_id
+        for r in results
+        if on_record and r.citations and all(c.kind == "document" for c in r.citations)
+    }
     found: dict[str, str] = {}
     for call in calls:
+        if call.id in background:
+            continue
         for value in call.arguments.values():
             if isinstance(value, str):
                 found.update(entities_in(value, types))
     for citation in citations:
         if citation.kind == "record":
             found.update(entities_in(citation.locator, types))
-        elif citation.kind == "document":
+        elif citation.kind == "document" and not on_record:
             found[DOCUMENT] = citation.title
     return found

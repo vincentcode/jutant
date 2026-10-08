@@ -253,13 +253,20 @@ async def test_customer_360_for_customer_service_with_figures_from_code() -> Non
 
 async def test_a_greeting_is_talked_to_not_searched() -> None:
     await make_staff("ama")
-    async with api(ModelReply("conversation"), ModelReply("Hello! What do you need?")) as client:
+    replies = [
+        ModelReply("conversation"),  # routing
+        ModelReply("Hello! What do you need?"),
+        ModelReply("greeting"),  # not thanking: the kinds of help are offered
+    ]
+    async with api(*replies) as client:
         await client.login("ama")
         conversation_id = await client.conversation()
         events = await client.ask(conversation_id, text="Good morning")
     assert tools_used(events) == []
     assert answer(events)["text"] == "Hello! What do you need?"  # not "no source found"
     assert answer(events)["feature_id"] == "conversation"
+    [offered] = [data for name, data in events if name == "clarify"]
+    assert offered["reason"] == "talk" and offered["choices"]
 
 
 async def test_the_conversation_hands_a_request_to_a_feature() -> None:

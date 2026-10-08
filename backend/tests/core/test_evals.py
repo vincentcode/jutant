@@ -161,6 +161,7 @@ async def test_a_follow_up_is_asked_after_its_earlier_turns_with_the_quick_actio
             ModelReply("transaction_lookup"),  # routing the earlier turn
             ModelReply("It failed."),  # nudge: no tool call yet
             ModelReply("It failed."),
+            ModelReply("other"),  # not more about the transfer
             ModelReply("policy_qa"),  # reading the turn: a new subject, for policy Q&A
             ModelReply(None, (ToolCall("1", "documents.search", {"query": "joint"}),)),
             ModelReply("Each holder needs photo ID and proof of address."),

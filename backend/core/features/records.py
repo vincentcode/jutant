@@ -95,9 +95,10 @@ def facts(record: Record, field: str | None) -> str:
 
 
 def not_shown(record: Record, sources: Sequence[str]) -> str:
-    """The answer when no field of the record says what was asked."""
+    """The answer when no field of the record says what was asked, pointing to the document
+    that best matched the turn's search (the first; the rest are its near misses)."""
     text = NOT_SHOWN.format(name=record.name)
-    return text + SEE.format(sources="; ".join(sources)) if sources else text
+    return text + SEE.format(sources=sources[0]) if sources else text
 
 
 def _fields(data: Mapping[str, Any], prefix: str = "") -> dict[str, str]:

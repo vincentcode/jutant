@@ -8,7 +8,11 @@
 
 Certain cases are decided without the model (`certain`): staff said what the message is (a step
 answer clicked on its card, Resume, Stop, "a new question"), staff locked a feature, there is no
-frame yet, or the message names an entity already in a frame (or a new one). Everything else is
+frame yet, or the message names an entity already in a frame (or a new one). A message that
+names nothing, with a subject open, is first asked about as a two-way question (`continues`):
+more about that subject, or something else? Most such messages are follow-ups, and a small model
+answers a two-way question reliably, where among ten options it drifts to a kind of help whose
+description sounds close ("what to do next" for "why was it not reversed?"). Everything else is
 read by the model (`read`), with the stack in view: one call, its reply checked against the
 options, asked once more if not; if still unclear, the caller decides what to do.
 """
@@ -38,6 +42,13 @@ CONFIRMED = "confirm"  # what a confirm step records
 SAME_INSTRUCTION = (
     "A staff member was talking about: {subject}.\nIs their new message about that same one, "
     "or about a different one of the same kind? Choose one."
+)
+# The subject by what it is about ("transfer TX-0002"), not by its feature: asked "more about
+# Transaction lookup: transfer TX-0002?", a small model answered "something else" even for "why
+# did it fail?". Named plainly, with "it" allowed for, it answers reliably.
+CONTINUES_INSTRUCTION = (
+    "A staff member has been asking an assistant about {subject}. Is their new message about "
+    '{subject} (it may call it "it"), or about something else? Choose one.'
 )
 ATTEMPTS = 2
 
@@ -99,6 +110,22 @@ def certain(
 def _takes(step: PlaybookStep, text: str) -> bool:
     """The step looks a record up by a pattern, and the message has one: it is the answer."""
     return bool(step.lookup and step.lookup.pattern and re.search(step.lookup.pattern, text))
+
+
+async def continues(model: ModelProvider, text: str, subject: str) -> bool | None:
+    """Whether `text`, which names nothing, is about the open `subject` (True) or about
+    something else (False); None if the model could not tell. `subject` names what it is
+    about ("transfer TX-0002")."""
+    options = [
+        Option("same", f"about {subject}"),
+        Option("other", "about something else"),
+    ]
+    instruction = CONTINUES_INSTRUCTION.format(subject=subject)
+    for _ in range(ATTEMPTS):
+        chosen = await ask_model(model, instruction, text, options)
+        if chosen is not None:
+            return chosen == "same"
+    return None
 
 
 async def same_subject(model: ModelProvider, text: str, subject: str) -> bool | None:

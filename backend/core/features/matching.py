@@ -2,7 +2,9 @@
 
 Used to pick a feature for a question and a playbook for a problem. The model is asked for a
 single id; its reply is accepted only if it is exactly one of the ids, give or take quotes,
-punctuation and case. A small model often adds words, so keyword scoring is the fallback.
+punctuation and case, or the option's place in the list ("2"): a small model often answers with
+the position of the option it means. It often adds words too, so keyword scoring is the
+fallback.
 """
 
 import re
@@ -43,13 +45,16 @@ def _stem(word: str) -> str:
 
 
 def parse_choice(reply: str | None, ids: Sequence[str]) -> str | None:
-    """The id the model replied with, or None if the reply is not exactly one of `ids`."""
+    """The id the model replied with, or None if the reply is not exactly one of `ids`, nor
+    the place of one in the list (1 for the first): an id wins over a place."""
     if not reply:
         return None
     cleaned = reply.strip().strip("`'\".:; ").lower()  # quotes and punctuation, in any order
     for option_id in ids:
         if cleaned == option_id.lower():
             return option_id
+    if cleaned.isdigit() and 1 <= int(cleaned) <= len(ids):
+        return ids[int(cleaned) - 1]
     return None
 
 

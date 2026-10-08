@@ -29,7 +29,7 @@ def test_a_list_two_records_or_an_empty_one_is_not_a_single_record() -> None:
 
 def test_not_shown_points_to_the_documents_for_what_generally_applies() -> None:
     record = single_record([record_result("Transaction", "TX-0002", {"status": "failed"})])
-    sources = document_sources([doc_result("Error codes", "E51"), doc_result("Error codes", "E51")])
+    sources = document_sources([doc_result("Error codes", "E51"), doc_result("KYC", "4.3")])
     assert not_shown(record, sources) == (
         "The record for transaction TX-0002 does not show that. "
         "For what generally applies, see Error codes, E51."

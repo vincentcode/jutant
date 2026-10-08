@@ -34,7 +34,9 @@ async def stack_of(rig, conversation) -> ContextStack:
 
 
 async def test_a_greeting_is_answered_without_tools_or_sources() -> None:
-    model = FakeModel(replies=[ModelReply("Hello! I can look up transfers and policies.")])
+    model = FakeModel(
+        replies=[ModelReply("Hello! I can look up transfers and policies."), ModelReply("greeting")]
+    )
     rig = await make_rig(model, features=WITH_TALK)
     conversation = uuid4()
     events = await collect_events(
@@ -54,6 +56,7 @@ async def test_small_talk_leaves_the_subject_staff_were_on() -> None:
         replies=[
             ModelReply("It failed."),
             ModelReply("It failed."),  # after the nudge to use tools
+            ModelReply("other"),  # not more about the transfer
             ModelReply("conversation"),  # reading "thanks": talk
             ModelReply("You're welcome."),
         ]
@@ -218,7 +221,9 @@ async def test_a_picker_and_the_pick_are_audited() -> None:
 
 
 async def test_talk_comes_with_the_kinds_of_help() -> None:
-    model = FakeModel(replies=[ModelReply("Of course! What do you need help with?")])
+    model = FakeModel(
+        replies=[ModelReply("Of course! What do you need help with?"), ModelReply("request")]
+    )
     rig = await make_rig(model, features=WITH_TALK, default="conversation")
     events = await collect_events(
         rig.orchestrator.ask(teller(), uuid4(), "I need help with something", "conversation")
@@ -230,7 +235,9 @@ async def test_talk_comes_with_the_kinds_of_help() -> None:
 
 
 async def test_talk_that_asks_nothing_still_offers_the_kinds_of_help() -> None:
-    model = FakeModel(replies=[ModelReply("Good evening! Let me know, and I'll guide you.")])
+    model = FakeModel(
+        replies=[ModelReply("Good evening! Let me know, and I'll guide you."), ModelReply("2")]
+    )
     rig = await make_rig(model, features=WITH_TALK, default="conversation")
     events = await collect_events(
         rig.orchestrator.ask(teller(), uuid4(), "good evening", "conversation")
@@ -244,6 +251,7 @@ async def test_in_hybrid_mode_an_unsure_question_goes_to_the_conversation() -> N
         replies=[
             ModelReply("hmm, maybe one of those"),  # the router's model cannot choose...
             ModelReply("I can look up transfers and policies."),  # ...so the conversation talks
+            ModelReply("request"),  # not thanking: the kinds of help are offered
         ]
     )
     rig = await make_rig(model, features=WITH_TALK, default="conversation", turn_mode="hybrid")
@@ -253,3 +261,39 @@ async def test_in_hybrid_mode_an_unsure_question_goes_to_the_conversation() -> N
     assert "The kinds of help you give:" in facts and "you cannot change anything" in facts
     routed = [d for _, name, d in rig.audit.events if name == "feature_routed"]
     assert routed[-1]["chosen_by"] == "unsure"
+
+
+async def test_thanks_comes_without_the_kinds_of_help() -> None:
+    model = FakeModel(replies=[ModelReply("You're welcome!"), ModelReply("thanks")])
+    rig = await make_rig(model, features=WITH_TALK, default="conversation")
+    events = await collect_events(
+        rig.orchestrator.ask(teller(), uuid4(), "Thanks, that's all", "conversation")
+    )
+    assert events[-1].answer.text == "You're welcome!"
+    assert not any(isinstance(e, Clarify) for e in events)
+    asked = model.calls[1].messages[0].content  # the model said they were only thanking
+    assert "thanks: thanking the assistant or saying goodbye" in asked
+
+
+async def test_with_a_subject_open_talk_offers_nothing_and_asks_nothing() -> None:
+    model = FakeModel(
+        replies=[
+            ModelReply("It failed."),
+            ModelReply("It failed."),  # after the nudge to use tools
+            ModelReply("other"),  # not more about the transfer
+            ModelReply("conversation"),  # reading: talk
+            ModelReply("Hello again!"),  # no "thanking?" pick: a subject is open
+        ]
+    )
+    rig = await make_rig(
+        model,
+        results={"transactions.get_status": record_result("Transaction", "TX-0002", {})},
+        features=WITH_TALK,
+    )
+    conversation = uuid4()
+    await collect_events(
+        rig.orchestrator.ask(teller(), conversation, "Why did TX-0002 fail?", "transaction_lookup")
+    )
+    events = await collect_events(rig.orchestrator.ask(teller(), conversation, "hello"))
+    assert events[-1].answer.text == "Hello again!"
+    assert not any(isinstance(e, Clarify) for e in events)

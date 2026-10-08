@@ -12,7 +12,7 @@ from uuid import uuid4
 import pytest
 
 from core.context import DOCUMENT, ContextStack, entities_in, from_calls, names_in, values_in
-from core.context.reader import Reading, certain, read, same_subject
+from core.context.reader import Reading, certain, continues, read, same_subject
 from core.context.stack import MAX_FRAMES, STALE_TURNS
 from core.events import (
     Clarify,
@@ -157,7 +157,7 @@ def test_a_turn_looked_at_what_it_called_and_cited_not_what_it_said() -> None:
         [Citation("record", "Transaction", "TX-0002"), Citation("document", "Error codes", "E51")],
         TYPES,
     )
-    assert found == {"transfer": "TX-0002", DOCUMENT: "Error codes"}
+    assert found == {"transfer": "TX-0002"}  # the code's document is background to the record
 
 
 # --- the stack ------------------------------------------------------------------------------
@@ -247,7 +247,7 @@ async def test_a_step_reply_names_its_option_and_an_unclear_one_gives_up() -> No
 
 async def test_a_follow_up_uses_the_subjects_transfer() -> None:
     rig, _, conversation = await bank(
-        ModelReply("It failed."), ModelReply("continue"), ModelReply("Closed.")
+        ModelReply("It failed."), ModelReply("same"), ModelReply("Closed.")
     )
     await ask(rig, conversation, "Why did TX-0002 fail?", "transaction_lookup")
     events = await ask(rig, conversation, "why did it fail?")
@@ -258,8 +258,10 @@ async def test_a_follow_up_uses_the_subjects_transfer() -> None:
 async def test_a_detour_and_back_restores_the_transfer() -> None:
     rig, _, conversation = await bank(
         ModelReply("It failed."),
+        ModelReply("other"),  # not more about the transfer...
         ModelReply("policy_qa"),  # reading: a new subject
         ModelReply("Two IDs."),
+        ModelReply("other"),  # not more about the policy...
         ModelReply("back_2"),  # reading: back to the transfer
         ModelReply("It failed: account closed."),
     )
@@ -286,6 +288,7 @@ async def test_a_new_subject_never_takes_another_subjects_entities() -> None:
 async def test_naming_the_entity_returns_without_asking_the_model() -> None:
     rig, model, conversation = await bank(
         ModelReply("It failed."),
+        ModelReply("other"),
         ModelReply("policy_qa"),
         ModelReply("Two IDs."),
         ModelReply("Account closed."),  # no reading call: TX-0002 names the subject
@@ -346,7 +349,7 @@ async def test_a_summarys_follow_up_is_answered_from_the_document() -> None:
     rig, _, conversation = await bank(
         ModelReply("Summary."),
         ModelReply("Summary."),  # after the nudge to use tools
-        ModelReply("continue"),  # reading: more about the summary
+        ModelReply("same"),  # more about the summary
         ModelReply("A branch manager approves it."),
         feats=feats,
     )
@@ -465,7 +468,10 @@ async def test_choosing_the_current_subjects_feature_is_a_new_subject() -> None:
 
 async def test_clicking_a_subject_returns_to_it_without_the_model() -> None:
     rig, model, conversation = await bank(
-        ModelReply("It failed."), ModelReply("policy_qa"), ModelReply("Two IDs.")
+        ModelReply("It failed."),
+        ModelReply("other"),
+        ModelReply("policy_qa"),
+        ModelReply("Two IDs."),
     )
     await ask(rig, conversation, "check TX-0002", "transaction_lookup")
     await ask(rig, conversation, "what ID do joint holders need?")
@@ -513,13 +519,14 @@ async def test_another_of_the_same_kind_or_the_same_one_is_asked_as_a_second_que
 async def test_a_follow_up_naming_nothing_stays_with_the_subject_that_has_the_reference() -> None:
     rig, model, conversation = await bank(
         ModelReply("It failed."),
-        ModelReply("transaction_lookup"),  # reading: the transfer feature again, as new...
+        ModelReply("other"),  # the model says something else...
+        ModelReply("transaction_lookup"),  # ...the transfer feature again, as new...
         ModelReply("Account closed."),  # ...but another transfer would have to be named
     )
     await ask(rig, conversation, "check TX-0002", "transaction_lookup")
     events = await ask(rig, conversation, "was it reversed to the sender?")
     assert events[-1].answer.text == "Account closed." and statuses(rig) == ["TX-0002"] * 2
-    assert len(model.calls) == 3  # no "same or different?" question: only it fits
+    assert len(model.calls) == 4  # no "same or different?" question: only it fits
     assert len((await stack_of(rig, conversation)).frames) == 1
 
 
@@ -539,6 +546,7 @@ async def test_the_same_subject_keeps_its_entities_when_the_model_says_so() -> N
 async def test_when_neither_can_tell_staff_are_asked_which_subject() -> None:
     rig, _, conversation = await bank(
         ModelReply("It failed."),
+        ModelReply("other"),
         ModelReply("transaction_lookup"),
         ModelReply("hmm"),
         ModelReply("eh"),  # the second question, asked twice, unclear
@@ -561,7 +569,9 @@ async def test_when_neither_can_tell_staff_are_asked_which_subject() -> None:
 
 
 async def test_an_unread_message_offers_the_subjects_and_kinds_of_help() -> None:
-    rig, _, conversation = await bank(ModelReply("It failed."), ModelReply("hmm"), ModelReply("eh"))
+    rig, _, conversation = await bank(
+        ModelReply("It failed."), ModelReply("other"), ModelReply("hmm"), ModelReply("eh")
+    )
     await ask(rig, conversation, "check TX-0002", "transaction_lookup")
     before = (await stack_of(rig, conversation)).as_dict()
     events = await ask(rig, conversation, "and the other thing?")
@@ -574,7 +584,11 @@ async def test_an_unread_message_offers_the_subjects_and_kinds_of_help() -> None
 
 async def test_a_picked_message_is_shown_once() -> None:
     rig, _, conversation = await bank(
-        ModelReply("It failed."), ModelReply("hmm"), ModelReply("eh"), ModelReply("Closed.")
+        ModelReply("It failed."),
+        ModelReply("other"),
+        ModelReply("hmm"),
+        ModelReply("eh"),
+        ModelReply("Closed."),
     )
     await ask(rig, conversation, "check TX-0002", "transaction_lookup")
     events = await ask(rig, conversation, "and why?")
@@ -701,3 +715,28 @@ async def test_the_records_facts_and_the_field_asked_go_to_the_model() -> None:
     facts = model.calls[1].messages[-1].content
     assert "- failure code: E51" in facts and "never state one as something" in facts
     assert facts.endswith("The question is about its failure reason.")
+
+
+async def test_a_message_naming_nothing_is_first_asked_more_or_something_else() -> None:
+    model = FakeModel(replies=[ModelReply("same"), ModelReply("other"), ModelReply("eh")] * 1)
+    subject = "transfer TX-0002"
+    assert await continues(model, "was it reversed?", subject) is True
+    assert await continues(model, "thanks, all done", subject) is False
+    asked = model.calls[0].messages[0].content
+    assert "asking an assistant about transfer TX-0002. Is their new message about" in asked
+    assert "same: about transfer TX-0002" in asked and "other: about something else" in asked
+
+
+def test_documents_searched_beside_a_record_are_not_what_the_subject_is_about() -> None:
+    status = ToolCall("s", "transactions.get_status", {"reference": "TX-0002"})
+    search = ToolCall("d", "documents.search", {"query": "E51"})
+    results = [
+        replace(record_result("Transaction", "TX-0002", {}), call_id="s"),
+        replace(doc_result("Kyc policy", "4.3"), call_id="d"),
+    ]
+    citations = [c for r in results for c in r.citations]
+    types = (*TYPES, EntityType("error_code", r"([A-Z]\d{2,3})"))
+    assert from_calls([status, search], citations, types, results) == {"transfer": "TX-0002"}
+    only_documents = [results[1]]  # a document question: its document is the subject
+    found = from_calls([search], only_documents[0].citations, types, only_documents)
+    assert found[DOCUMENT] == "Kyc policy"
