@@ -91,6 +91,18 @@ EXAMPLES = features(
 )
 
 
+# The same, but the transfer feature does not ask for a reference: a follow-up naming nothing
+# could then be about another transfer, so the model is asked (and staff, if it cannot tell).
+WITHOUT_ASKING = features(
+    policy_qa={"route_examples": ("What does the policy say?",), "prefetch": (SEARCH,)},
+    transaction_lookup={
+        "route_examples": ("Why did the transfer fail?",),
+        "route_patterns": (r"TX-\d+",),
+        "prefetch": (STATUS,),
+    },
+)
+
+
 def shown(events) -> list[int]:
     return [e.step.order for e in events if isinstance(e, PlaybookStepShown)]
 
@@ -499,12 +511,26 @@ async def test_another_of_the_same_kind_or_the_same_one_is_asked_as_a_second_que
     assert "product CUR-BIZ" in model.calls[0].messages[0].content
 
 
-async def test_the_same_subject_keeps_its_entities_and_another_starts_empty() -> None:
+async def test_a_follow_up_naming_nothing_stays_with_the_subject_that_has_the_reference() -> None:
+    rig, model, conversation = await bank(
+        ModelReply("It failed."),
+        ModelReply("transaction_lookup"),  # reading: the transfer feature again, as new...
+        ModelReply("Account closed."),  # ...but another transfer would have to be named
+    )
+    await ask(rig, conversation, "check TX-0002", "transaction_lookup")
+    events = await ask(rig, conversation, "was it reversed to the sender?")
+    assert events[-1].answer.text == "Account closed." and statuses(rig) == ["TX-0002"] * 2
+    assert len(model.calls) == 3  # no "same or different?" question: only it fits
+    assert len((await stack_of(rig, conversation)).frames) == 1
+
+
+async def test_the_same_subject_keeps_its_entities_when_the_model_says_so() -> None:
     rig, _, conversation = await bank(
         ModelReply("It failed."),
         ModelReply("transaction_lookup"),  # reading: the transfer feature again...
         ModelReply("same"),  # ...about the same transfer
         ModelReply("Account closed."),
+        feats=WITHOUT_ASKING,
     )
     await ask(rig, conversation, "check TX-0002", "transaction_lookup")
     events = await ask(rig, conversation, "why did it fail?")
@@ -518,6 +544,7 @@ async def test_when_neither_can_tell_staff_are_asked_which_subject() -> None:
         ModelReply("hmm"),
         ModelReply("eh"),  # the second question, asked twice, unclear
         ModelReply("Account closed."),
+        feats=WITHOUT_ASKING,
     )
     await ask(rig, conversation, "check TX-0002", "transaction_lookup")
     before = (await stack_of(rig, conversation)).as_dict()

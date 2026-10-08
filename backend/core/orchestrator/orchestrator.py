@@ -243,7 +243,9 @@ class Orchestrator:
             reading = await self._read(caller, conversation_id, text, stack, turn, timer)
             if reading is not None and not mentioned:
                 same_kind = self._same_kind(stack, reading)
-                if same_kind is not None:
+                if same_kind is not None and self._only_it(same_kind, text):
+                    reading = Reading("continue", same_kind.id, by="needs")
+                elif same_kind is not None:
                     reading = await self._which_subject(
                         text, stack, same_kind, reading, turn, timer
                     )
@@ -774,6 +776,19 @@ class Orchestrator:
         return next(
             (f for f in stack.frames if not f.procedure and f.feature_id == reading.feature_id),
             None,
+        )
+
+    def _only_it(self, frame: Frame, text: str) -> bool:
+        """The message can only be about `frame`, not another of its kind: its feature needs a
+        reference to look anything up (it asks for one), the message names none, and `frame`
+        has one. Another transfer would have to be named; unnamed, a new subject could only ask
+        "which one?" ("was it reversed?" after a transfer is that transfer)."""
+        feature = self._feature(frame.feature_id)
+        return bool(
+            feature.ask_for
+            and feature.prefetch
+            and not planned_calls(feature, text, {})
+            and planned_calls(feature, text, frame.entities)
         )
 
     async def _which_subject(
