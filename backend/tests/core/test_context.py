@@ -17,6 +17,7 @@ from core.context.stack import MAX_FRAMES, STALE_TURNS
 from core.events import (
     Clarify,
     Completed,
+    Failed,
     FeatureSelected,
     PlaybookStepShown,
     TextDelta,
@@ -204,7 +205,15 @@ def test_naming_an_entity_returns_to_its_subject_without_the_model() -> None:
         "return", earlier, by="entity"
     )
     assert certain(stack, "", {"transfer": "TX-0009"}, None, None) == Reading("new", by="entity")
+    stack.put(stack.top.with_exchange("why did it fail?", "Account closed."))
     assert certain(stack, "", {}, None, None) is None  # names nothing: the model reads it
+
+
+def test_a_subject_staff_just_started_takes_their_next_message() -> None:
+    stack = ContextStack()
+    started = stack.push("product_lookup")  # picked from the buttons: nothing asked yet
+    reading = certain(stack, "what products does the bank have", {}, None, None)
+    assert reading == Reading("continue", started.id, by="started")
 
 
 def test_staff_saying_what_a_message_is_decides_it() -> None:
@@ -740,3 +749,48 @@ def test_documents_searched_beside_a_record_are_not_what_the_subject_is_about() 
     only_documents = [results[1]]  # a document question: its document is the subject
     found = from_calls([search], only_documents[0].citations, types, only_documents)
     assert found[DOCUMENT] == "Kyc policy"
+
+
+class DownModel(FakeModel):
+    """Answers until `up` runs out, then cannot be reached."""
+
+    def __init__(self, replies, up: int):
+        super().__init__(replies=replies)
+        self.up = up
+
+    async def chat(self, messages, tools):
+        if self.up <= 0:
+            from core.errors import ModelUnavailable
+
+            raise ModelUnavailable("host down")
+        self.up -= 1
+        return await super().chat(messages, tools)
+
+
+async def test_a_model_out_of_reach_while_reading_says_so_not_which_is_it() -> None:
+    model = DownModel([ModelReply("It failed.")], up=1)
+    rig = await make_rig(
+        model,
+        results={"transactions.get_status": record_result("Transaction", "TX-0002", {})},
+        specs=SPECS,
+        features=EXAMPLES,
+        entity_types=TYPES,
+    )
+    conversation = uuid4()
+    await ask(rig, conversation, "check TX-0002", "transaction_lookup")
+    events = await ask(rig, conversation, "and why?")
+    assert isinstance(events[-1], Failed) and events[-1].reason == "model_unavailable"
+    assert not any(isinstance(e, Clarify) for e in events)
+
+
+async def test_the_picker_offers_each_choice_once() -> None:
+    rig, _, conversation = await bank(ModelReply("other"), ModelReply("hmm"), ModelReply("eh"))
+    stack = ContextStack()
+    stack.push("transaction_lookup")  # two subjects that name nothing yet...
+    stack.put(stack.push("transaction_lookup").with_exchange("q", "a"))
+    await rig.conversations.save_context(conversation, stack.as_dict())
+    events = await ask(rig, conversation, "and the other one?")
+    [asked] = [e for e in events if isinstance(e, Clarify)]
+    titles = [c.title for c in asked.choices]
+    assert len(titles) == len(set(titles))  # ...and their kind of help: one button
+    assert asked.choices[0].kind == "subject"

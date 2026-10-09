@@ -172,6 +172,11 @@ async def test_product_search_puts_the_best_match_first(bank: BankSystems) -> No
     assert await bank.catalog.search_products("zzzz") == []
 
 
+async def test_an_empty_product_search_lists_every_product(bank: BankSystems) -> None:
+    everything = await bank.catalog.search_products("")
+    assert len(everything) > 1 and {"CUR-BIZ", "SAV-STD"} <= {p["code"] for p in everything}
+
+
 async def test_a_product(bank: BankSystems) -> None:
     product = await bank.catalog.get_product("SAV-STD")
     assert_shape(product, Product)

@@ -97,6 +97,9 @@ def certain(
         return Reading("new", feature_id=locked_feature, by="locked")
     if top.procedure and step is not None and _takes(step, text):
         return Reading("continue", top.id, by="step")
+    if not top.procedure and not top.exchanges and not top.entities and not mentioned:
+        # staff just started this kind of help (picked it): the message is its first question
+        return Reading("continue", top.id, by="started")
     if top.procedure or not mentioned:
         return None  # a reply to a step, or a message naming nothing: read it
     if any(top.entities.get(kind) == value for kind, value in mentioned.items()):
@@ -122,7 +125,7 @@ async def continues(model: ModelProvider, text: str, subject: str) -> bool | Non
     ]
     instruction = CONTINUES_INSTRUCTION.format(subject=subject)
     for _ in range(ATTEMPTS):
-        chosen = await ask_model(model, instruction, text, options)
+        chosen = await ask_model(model, instruction, text, options, unavailable_raises=True)
         if chosen is not None:
             return chosen == "same"
     return None
@@ -139,7 +142,7 @@ async def same_subject(model: ModelProvider, text: str, subject: str) -> bool | 
     ]
     instruction = SAME_INSTRUCTION.format(subject=subject)
     for _ in range(ATTEMPTS):
-        chosen = await ask_model(model, instruction, text, options)
+        chosen = await ask_model(model, instruction, text, options, unavailable_raises=True)
         if chosen is not None:
             return chosen == "same"
     return None
@@ -161,7 +164,7 @@ async def read(
     subjects = "\n".join(f"{n}. {describe(f)}" for n, f in enumerate(stack.frames[:4], 1))
     instruction = INSTRUCTION.format(subjects=subjects)
     for _ in range(ATTEMPTS):
-        chosen = await ask_model(model, instruction, text, options)
+        chosen = await ask_model(model, instruction, text, options, unavailable_raises=True)
         if chosen is not None:
             return readings[chosen]
     return None

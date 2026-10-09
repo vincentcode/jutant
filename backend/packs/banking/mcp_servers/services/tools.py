@@ -22,7 +22,11 @@ def create_server(
 ) -> GuardedServer:
     server = GuardedServer("services", engine, secret)
 
-    @server.tool("search_products", "Find bank products by name or code. Returns codes and names.")
+    @server.tool(
+        "search_products",
+        "Find bank products by name or code; an empty query lists every product. Returns codes "
+        "and names.",
+    )
     async def search_products(caller: Caller, query: str) -> ToolOutput:
         products = await catalog.search_products(query.strip())
         return ToolOutput(

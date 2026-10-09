@@ -82,9 +82,16 @@ async def choose(
 
 
 async def ask_model(
-    model: ModelProvider, instruction: str, text: str, options: Sequence[Option]
+    model: ModelProvider,
+    instruction: str,
+    text: str,
+    options: Sequence[Option],
+    *,
+    unavailable_raises: bool = False,
 ) -> str | None:
-    """The option the model picks, or None if it is unavailable or its reply is not an id."""
+    """The option the model picks, or None if its reply is not an id, or if it is unavailable
+    (unless `unavailable_raises`: a caller with no fallback says the model is unavailable
+    rather than treating it as "could not tell")."""
     listing = "\n".join(f"{o.id}: {o.description}" for o in options)
     messages = [
         Message("system", f"{instruction}\n\n{listing}\n\nReply with the id only."),
@@ -93,5 +100,7 @@ async def ask_model(
     try:
         reply = await model.chat(messages, [])
     except ModelUnavailable:
+        if unavailable_raises:
+            raise
         return None
     return parse_choice(reply.text, [o.id for o in options])

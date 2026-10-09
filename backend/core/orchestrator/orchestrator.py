@@ -180,19 +180,26 @@ class Orchestrator:
             feature=feature_id,
             preferred=preferred_feature_id,
         ) as turn:
-            async for event in self._ask(
-                caller,
-                conversation_id,
-                text,
-                feature_id,
-                upload_text,
-                preferred_feature_id,
-                reply_as,
-                subject_id,
-                turn,
-                picked,
-            ):
-                yield event
+            try:
+                async for event in self._ask(
+                    caller,
+                    conversation_id,
+                    text,
+                    feature_id,
+                    upload_text,
+                    preferred_feature_id,
+                    reply_as,
+                    subject_id,
+                    turn,
+                    picked,
+                ):
+                    yield event
+            except ModelUnavailable:  # reading the turn: the answer's own case is in _finish
+                turn.fail(MODEL_UNAVAILABLE)
+                await self._audit_answer(
+                    caller, conversation_id, "", TurnTimer(), failed=MODEL_UNAVAILABLE
+                )
+                yield Failed(MODEL_UNAVAILABLE)
 
     async def _ask(
         self,
@@ -447,7 +454,9 @@ class Orchestrator:
             and not (procedure is not None and f.template == PROCEDURE_TEMPLATE)
         ]
         choices.append(Choice("new", "Something else"))
-        return tuple(choices)
+        # Once each by its words: two subjects naming nothing yet, and their kind of help, all
+        # read "Product lookup"; the first (the most recent subject) is kept.
+        return tuple(_once(choices))
 
     async def _clarify(
         self,
@@ -466,10 +475,11 @@ class Orchestrator:
         await self._audit_clarify(caller, conversation_id, asked)
         if not stored:
             await self.conversations.append(conversation_id, Message("user", text))
-        await self.conversations.append(conversation_id, Message("assistant", WHICH), feature_id)
+        # The question is not a feature's answer: stored without one ("Answered by" none).
+        await self.conversations.append(conversation_id, Message("assistant", WHICH))
         yield TextDelta(WHICH)
         yield asked
-        yield Completed(Answer(WHICH, feature_id, (), ()))
+        yield Completed(Answer(WHICH, "", (), ()))
 
     async def _audit_clarify(self, caller: Caller, conversation_id: UUID, asked: Clarify) -> None:
         """What staff were asked to pick from, and why: `report_turns` reads it."""
@@ -628,7 +638,7 @@ class Orchestrator:
                     ):
                         yield event
                     return
-                events = _then(_once(first), events)
+                events = _then(_one(first), events)
                 switched = None  # talking is not answering for another feature
         yield FeatureSelected(feature.id, switched)
         async for event in self._finish(
@@ -1137,7 +1147,13 @@ async def _say(text: str) -> AsyncIterator[Event]:
     yield TextDelta(text)
 
 
-async def _once(event: Event | None) -> AsyncIterator[Event]:
+def _once(choices: Sequence[Choice]) -> list[Choice]:
+    """`choices` with a title repeated left out, the first of each kept."""
+    seen: set[str] = set()
+    return [c for c in choices if not (c.title in seen or seen.add(c.title))]
+
+
+async def _one(event: Event | None) -> AsyncIterator[Event]:
     if event is not None:
         yield event
 
