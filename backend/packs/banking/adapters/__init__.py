@@ -8,13 +8,18 @@ by JUTANT_CORE_BANKING_* and JUTANT_SERVICE_CATALOG_* variables (see `http.Conne
 import os
 from dataclasses import dataclass
 
-from packs.banking.adapters.base import CoreBankingClient, ServiceCatalogClient
+from packs.banking.adapters.base import CoreBankingClient, ServiceCatalogClient, TransactionSource
+from packs.banking.adapters.core_banking_source import CoreBankingTransactions
+
+# The channels core banking records, until the bank says (questionnaire: "Channels").
+CORE_CHANNELS = frozenset({"branch"})
 
 
 @dataclass(frozen=True)
 class BankSystems:
     banking: CoreBankingClient
     catalog: ServiceCatalogClient
+    transactions: tuple[TransactionSource, ...] = ()  # every system that records transactions
 
 
 def build(mode: str | None = None) -> BankSystems:
@@ -23,14 +28,19 @@ def build(mode: str | None = None) -> BankSystems:
     if mode == "fake":
         from packs.banking.adapters.fake import FakeCoreBanking, FakeServiceCatalog
 
-        return BankSystems(FakeCoreBanking(), FakeServiceCatalog())
+        banking = FakeCoreBanking()
+        return BankSystems(
+            banking, FakeServiceCatalog(), (CoreBankingTransactions(banking, CORE_CHANNELS),)
+        )
     if mode == "real":
         from packs.banking.adapters.core_banking import HttpCoreBankingClient
         from packs.banking.adapters.http import BankHttp, Connection
         from packs.banking.adapters.service_catalog import HttpServiceCatalogClient
 
+        core = HttpCoreBankingClient(BankHttp(Connection.from_env("JUTANT_CORE_BANKING")))
         return BankSystems(
-            HttpCoreBankingClient(BankHttp(Connection.from_env("JUTANT_CORE_BANKING"))),
+            core,
             HttpServiceCatalogClient(BankHttp(Connection.from_env("JUTANT_SERVICE_CATALOG"))),
+            (CoreBankingTransactions(core, CORE_CHANNELS),),
         )
     raise ValueError(f"JUTANT_BANKING_ADAPTERS must be 'fake' or 'real', not {mode!r}")

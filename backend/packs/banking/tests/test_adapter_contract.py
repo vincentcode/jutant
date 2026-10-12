@@ -13,7 +13,7 @@ from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
 import httpx
 import pytest
 
-from packs.banking.adapters import BankSystems
+from packs.banking.adapters import CORE_CHANNELS, BankSystems
 from packs.banking.adapters.base import (
     Account,
     Customer,
@@ -25,6 +25,7 @@ from packs.banking.adapters.base import (
     Transaction,
 )
 from packs.banking.adapters.core_banking import HttpCoreBankingClient
+from packs.banking.adapters.core_banking_source import CoreBankingTransactions
 from packs.banking.adapters.fake import FakeCoreBanking, FakeServiceCatalog
 from packs.banking.adapters.http import BankHttp, Connection
 from packs.banking.adapters.service_catalog import HttpServiceCatalogClient
@@ -195,3 +196,13 @@ async def test_open_requests(bank: BankSystems) -> None:
     for request in requests:
         assert_shape(request, OpenRequest)
     assert await bank.catalog.open_requests("C1002") == []
+
+
+async def test_core_banking_is_a_transaction_source(bank: BankSystems) -> None:
+    source = CoreBankingTransactions(bank.banking, CORE_CHANNELS)
+    [one] = await source.search({"reference": "TX-0002"})
+    assert_shape(one, Transaction)
+    dated = await source.search({"account_number": "0011223344", "date": "2026-09-30"})
+    assert [r["reference"] for r in dated] == ["TX-0002"]
+    assert await source.search({"reference": "TX-9999"}) == []
+    assert await source.search({"account_number": "9999999999"}) == []

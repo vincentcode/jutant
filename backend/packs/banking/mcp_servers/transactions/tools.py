@@ -1,4 +1,5 @@
-"""Tools over the core banking system: recent transactions and transfer status.
+"""Tools over the bank's transactions: recent ones on an account, and one transfer's status.
+They ask the transaction service, which knows which of the bank's systems to look in.
 
 Every tool is registered on a GuardedServer, which checks access and hides fields before data
 leaves the server. Each tool returns the account it read as the record, so the branch rule can
@@ -11,13 +12,15 @@ from typing import Any, Literal
 from core.policy.engine import PolicyEngine
 from core.types import Caller, Citation
 from mcp_servers.common.guard import GuardedServer, ToolInputError, ToolOutput
-from packs.banking.adapters.base import CoreBankingClient
+from packs.banking.domain.transactions import TransactionService
 
 MAX_TRANSACTIONS = 20
 TRANSACTION_FIELDS = ("reference", "date", "amount", "direction", "narration", "status")
 
 
-def create_server(banking: CoreBankingClient, engine: PolicyEngine, secret: str) -> GuardedServer:
+def create_server(
+    transactions: TransactionService, engine: PolicyEngine, secret: str
+) -> GuardedServer:
     server = GuardedServer("transactions", engine, secret)
 
     @server.tool(
@@ -39,8 +42,7 @@ def create_server(banking: CoreBankingClient, engine: PolicyEngine, secret: str)
             filters["to_date"] = _iso_date(to_date)
         if direction:
             filters["direction"] = direction
-        account = await banking.get_account(account_number)
-        rows = await banking.list_transactions(account_number, **filters)
+        account, rows = await transactions.statement(account_number, **filters)
         return ToolOutput(
             data={
                 "account_number": account_number,
@@ -56,8 +58,7 @@ def create_server(banking: CoreBankingClient, engine: PolicyEngine, secret: str)
         "Status of one transaction or transfer by its reference, with the reason if it failed.",
     )
     async def get_status(caller: Caller, reference: str) -> ToolOutput:
-        transaction = await banking.get_transaction(reference.strip().upper())
-        account = await banking.get_account(transaction["account_number"])
+        transaction, account = await transactions.status(reference.strip().upper())
         return ToolOutput(
             data={
                 **{k: transaction.get(k) for k in TRANSACTION_FIELDS},

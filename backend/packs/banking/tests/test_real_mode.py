@@ -8,9 +8,12 @@ import httpx
 from core.packs.loader import load_pack
 from core.policy.engine import PolicyEngine
 from core.types import Caller, ToolCall
+from packs.banking.adapters import CORE_CHANNELS
 from packs.banking.adapters.core_banking import HttpCoreBankingClient
+from packs.banking.adapters.core_banking_source import CoreBankingTransactions
 from packs.banking.adapters.http import BankHttp, Connection
 from packs.banking.adapters.service_catalog import HttpServiceCatalogClient
+from packs.banking.domain.transactions import TransactionService
 from packs.banking.mcp_servers import PACK_DIR
 from packs.banking.mcp_servers.services.tools import create_server as services_server
 from packs.banking.mcp_servers.transactions.tools import create_server as transactions_server
@@ -35,7 +38,11 @@ async def tools(transport: httpx.AsyncBaseTransport):
     http = BankHttp(Connection("http://bank"), transport=transport)
     banking, catalog = HttpCoreBankingClient(http), HttpServiceCatalogClient(http)
     servers = {
-        "transactions": transactions_server(banking, engine, SECRET),
+        "transactions": transactions_server(
+            TransactionService([CoreBankingTransactions(banking, CORE_CHANNELS)], banking),
+            engine,
+            SECRET,
+        ),
         "services": services_server(banking, catalog, engine, SECRET),
     }
     try:

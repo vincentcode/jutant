@@ -9,6 +9,7 @@ Conventions: money is a decimal string ("4520.75", "-250.00"; debits negative), 
 ISO (YYYY-MM-DD), codes and references are upper case.
 """
 
+from collections.abc import Mapping
 from typing import Any, Literal, NotRequired, Protocol, TypedDict
 
 
@@ -89,6 +90,23 @@ class CoreBankingClient(Protocol):
 
     async def get_transaction(self, reference: str) -> Transaction: ...
     async def get_customer(self, customer_number: str) -> Customer: ...
+
+
+class TransactionSource(Protocol):
+    """A system that records transactions, as the transaction service asks it
+    (`packs.banking.domain.transactions`): which channels it records, and which sets of details
+    it can search by. Core banking is one; the mobile app's, USSD's and the wallet gateway's
+    systems are others."""
+
+    name: str  # for staff and the logs: "core banking"
+    channels: frozenset[str]  # the pack's channel ids it records: "branch", "ussd"...
+    # Each set is enough to search by: {"reference"}, {"phone", "date"}...
+    searchable_by: tuple[frozenset[str], ...]
+
+    async def search(self, criteria: Mapping[str, str]) -> list[Transaction]:
+        """Transactions matching `criteria` (reference, account_number, phone, date), newest
+        first; none gives []. Raises BankUnavailable when the system does not answer."""
+        ...
 
 
 class ServiceCatalogClient(Protocol):

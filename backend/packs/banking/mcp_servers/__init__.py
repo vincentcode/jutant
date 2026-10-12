@@ -11,6 +11,7 @@ from core.packs.loader import load_pack
 from core.policy.engine import PolicyEngine
 from mcp_servers.common.guard import GuardedServer
 from packs.banking import adapters
+from packs.banking.domain.transactions import TransactionService
 
 PACK_DIR = Path(__file__).resolve().parents[1]
 
@@ -24,7 +25,9 @@ def build_servers(
 
     systems = adapters.build(mode)
     return {
-        "transactions": transactions_server(systems.banking, engine, secret),
+        "transactions": transactions_server(
+            TransactionService(systems.transactions, systems.banking), engine, secret
+        ),
         "services": services_server(systems.banking, systems.catalog, engine, secret),
     }
 
