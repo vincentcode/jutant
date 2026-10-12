@@ -81,6 +81,9 @@ class FeatureContext:
     search_text: str = ""
     # The subject's current entities (type -> id), for prefetch calls: TX-0002 named earlier.
     entities: dict[str, str] = field(default_factory=dict)
+    # The details staff gave for it (name -> value: the system to look in, a date), for
+    # prefetch calls (`core.features.needs`).
+    details: dict[str, str] = field(default_factory=dict)
 
     @property
     def lookup(self) -> str:
@@ -129,8 +132,14 @@ async def tool_loop(
     made: set[tuple[str, str]] = set()
     chosen = await chosen_calls(ctx.model, ctx.feature, ctx.question, ctx.entities)
     rounds = (
-        lambda: [*planned_calls(ctx.feature, ctx.lookup, ctx.entities), *chosen, *extra_calls],
-        lambda: planned_calls(ctx.feature, ctx.lookup, {**_pointed_to(ctx), **ctx.entities}),
+        lambda: [
+            *planned_calls(ctx.feature, ctx.lookup, ctx.entities, ctx.details),
+            *chosen,
+            *extra_calls,
+        ],
+        lambda: planned_calls(
+            ctx.feature, ctx.lookup, {**_pointed_to(ctx), **ctx.entities}, ctx.details
+        ),
     )
     for plan in rounds:
         for call in plan():

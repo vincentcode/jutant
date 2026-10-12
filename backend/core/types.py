@@ -1,5 +1,6 @@
 """Frozen dataclasses shared across the core. No behaviour beyond small helpers."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal
@@ -79,6 +80,8 @@ class ArgumentSource:
     # The values it can take, as (value, what it means): the model picks one for the question,
     # or none, and the call is made in code (a request type: joint_account_opening).
     choose: tuple[tuple[str, str], ...] = ()
+    detail: str | None = None  # one of the feature's details (`Detail`), once staff gave it
+    optional: bool = False  # left out of the call when it has no value, instead of no call
 
 
 @dataclass(frozen=True)
@@ -92,6 +95,41 @@ class EntityType:
     # In a tool result, the field holding one's name ("Standard Savings" for SAV-STD), so a
     # later message using the name points to it.
     name_field: str | None = None
+
+
+@dataclass(frozen=True)
+class Detail:
+    """Something a feature must know before it looks anything up (`core.features.needs`).
+    Found by an entity type's pattern, picked from listed values, or a date: exactly one."""
+
+    name: str
+    label: str  # what it is, in staff's words, for asking: "the customer's phone number"
+    entity: str | None = None  # the entity type whose id it is
+    # The values staff pick from, as (value, title): a message gives one by naming it (its
+    # title, its id or one of its `words`), else staff are asked with the titles as buttons.
+    choose: tuple[tuple[str, str], ...] = ()
+    words: tuple[tuple[str, tuple[str, ...]], ...] = ()  # value -> other words naming it
+    date: bool = False  # a date, read in code
+    ask: str = ""  # the question asking for it alone (a choice: "Which ... was it?")
+    title: str = ""  # its name on a button ("Phone number"); else from its label
+
+
+@dataclass(frozen=True)
+class Needs:
+    """Which details a feature needs: `first`, asked one at a time, then any one complete set of
+    `one_of`. With `by`, the sets depend on that detail's value (`one_of_by`), falling back to
+    `one_of` for a value not listed."""
+
+    first: tuple[str, ...] = ()
+    one_of: tuple[tuple[str, ...], ...] = ()
+    by: str | None = None
+    one_of_by: tuple[tuple[str, tuple[tuple[str, ...], ...]], ...] = ()
+
+    def sets_for(self, known: Mapping[str, str]) -> tuple[tuple[str, ...], ...]:
+        """The sets that apply, given the details `known`."""
+        if self.by is not None and (value := known.get(self.by)) is not None:
+            return dict(self.one_of_by).get(value, self.one_of)
+        return self.one_of
 
 
 @dataclass(frozen=True)
@@ -122,6 +160,9 @@ class Feature:
     # Where follow-ups to this feature's answers go, if not to itself (after a summary, to the
     # feature that answers questions about documents).
     follow_ups: str = ""
+    # What it must know before looking anything up, asked for in code when missing.
+    details: tuple[Detail, ...] = ()
+    needs: Needs | None = None
 
     def allows(self, role: str) -> bool:
         return not self.roles or role in self.roles

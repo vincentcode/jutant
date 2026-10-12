@@ -20,6 +20,10 @@ class Frame:
     # What its records point to (a transfer's failure code): not what the subject is about, so
     # not used for its own lookups, but passed to a question about the same case.
     related: dict[str, str] = field(default_factory=dict)
+    # What staff told its feature it needs (`core.features.needs`): name -> value. And whether
+    # the subject's last answer asked for more: then a message giving any of it is its reply.
+    details: dict[str, str] = field(default_factory=dict)
+    awaiting: bool = False
 
     def with_entities(self, found: dict[str, str]) -> "Frame":
         return replace(self, entities={**self.entities, **found}) if found else self
@@ -107,6 +111,8 @@ class ContextStack:
                     "exchanges": [list(e) for e in f.exchanges],
                     "touched": f.touched,
                     "related": f.related,
+                    "details": f.details,
+                    "awaiting": f.awaiting,
                 }
                 for f in self.frames
             ],
@@ -125,6 +131,8 @@ class ContextStack:
                 tuple((str(q), str(a)) for q, a in f.get("exchanges") or ()),
                 int(f.get("touched", 0)),
                 {str(k): str(v) for k, v in (f.get("related") or {}).items()},
+                {str(k): str(v) for k, v in (f.get("details") or {}).items()},
+                bool(f.get("awaiting")),
             )
             for f in data.get("frames") or ()
         ]

@@ -43,7 +43,7 @@ export interface Answer {
 
 /** One thing a message might be, for staff to pick when the assistant could not tell. */
 export interface Choice {
-  kind: 'answer' | 'subject' | 'resume' | 'feature' | 'new'
+  kind: 'answer' | 'subject' | 'resume' | 'feature' | 'new' | 'detail'
   title: string
   subject_id: number | null
   feature_id: string | null

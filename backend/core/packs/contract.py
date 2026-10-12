@@ -16,13 +16,16 @@
 - every route pattern is a valid regular expression;
 - every prefetched call uses one of its feature's tools, with arguments the tool accepts, and
   each `match` is a valid regular expression with at most one group;
+- a feature's details name known entity types, its needs name its details (`by` one asked
+  first, with values to pick from, and `one_of_by` only those values), and its prefetch calls
+  use only its details;
 - every feature has at least one eval question.
 """
 
 import re
 
 from core.packs.loader import SYSTEM_PROMPT, Pack
-from core.packs.manifest import PrefetchDef
+from core.packs.manifest import FeatureDef, PrefetchDef
 from core.playbooks.runner import PLACEHOLDER
 from core.types import Playbook, ToolSpec
 
@@ -55,6 +58,13 @@ def check(pack: Pack, tool_specs: list[ToolSpec]) -> list[str]:
                 problems.append(f"feature {f.id}: route pattern {pattern!r}: {error}")
         for p in f.prefetch:
             problems.extend(_prefetch_problems(f.id, f.tools, p, specs, set(m.entities)))
+            for name, argument in p.arguments.items():
+                if argument.detail and argument.detail not in f.details:
+                    problems.append(
+                        f"feature {f.id}: prefetch {p.tool} argument {name}: unknown detail "
+                        f"{argument.detail}"
+                    )
+        problems.extend(_needs_problems(f, set(m.entities)))
         if f.ask_for and not f.prefetch:
             problems.append(f"feature {f.id}: ask_for needs prefetch calls to ask for")
         if f.follow_ups and f.follow_ups not in feature_ids:
@@ -201,6 +211,34 @@ def _prefetch_problems(
             problems.append(f"{where}: argument {name}: {error}")
         if argument.entity and argument.entity not in (entities or set()):
             problems.append(f"{where}: argument {name}: unknown entity {argument.entity}")
+    return problems
+
+
+def _needs_problems(f: FeatureDef, entities: set[str]) -> list[str]:
+    where = f"feature {f.id}"
+    problems = [
+        f"{where}: detail {name}: unknown entity {d.entity}"
+        for name, d in f.details.items()
+        if d.entity and d.entity not in entities
+    ]
+    needs = f.needs
+    if needs is None:
+        return problems
+    named = [*needs.first, *(n for s in needs.one_of for n in s)]
+    named += [n for sets in needs.one_of_by.values() for s in sets for n in s]
+    for name in sorted(set(named) - set(f.details)):
+        problems.append(f"{where}: needs names unknown detail {name}")
+    if needs.by is not None:
+        by = f.details.get(needs.by)
+        if needs.by not in needs.first or by is None or not by.choose:
+            problems.append(f"{where}: needs.by must be a detail asked first, with values to pick")
+        else:
+            for value in sorted(set(needs.one_of_by) - set(by.choose)):
+                problems.append(f"{where}: needs.one_of_by: {value} is not a value of {needs.by}")
+    elif needs.one_of_by:
+        problems.append(f"{where}: needs.one_of_by needs needs.by")
+    if not any(a.detail for p in f.prefetch for a in p.arguments.values()):
+        problems.append(f"{where}: needs details that no prefetch call uses")
     return problems
 
 

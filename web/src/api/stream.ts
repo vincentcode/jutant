@@ -6,7 +6,7 @@ import type { StreamEvent } from './events'
 
 /** A step answer clicked on its card, staff's reply to "your answer or a new question?", a
  * paused procedure's Resume and Stop, or a subject chip clicked to return to it. */
-export type ReplyAs = 'answer' | 'question' | 'resume' | 'stop' | 'return' | 'continue' | 'start'
+export type ReplyAs = 'answer' | 'question' | 'resume' | 'stop' | 'return' | 'continue' | 'start' | 'detail'
 
 export interface AskBody {
   text: string

@@ -14,8 +14,11 @@
    see below). Check the caller's role may use it. Run its
    template with the subject's entities, so lookups use them ("why did it fail?" after TX-0002),
    and its own last few exchanges as history. If the subject lacks what the feature's lookups
-   need, the feature's `ask_for` question is the answer instead. A procedure below the top waits
-   (paused) until staff return to it.
+   need, the feature's `ask_for` question is the answer instead; or, for a feature that
+   declares what it needs (`core.features.needs`), the question for what is still missing (a
+   choice as buttons), in code. What staff give is kept with the subject, and their reply to
+   the question continues it. A procedure below the top waits (paused) until staff return to
+   it.
 5. Collect citations from the tool results. A template that requires citations never returns an
    uncited answer: it is replaced with a fixed "no source found" message. Such answers are held
    back until this check is done, rather than streamed as they arrive.
@@ -67,6 +70,7 @@ from core.events import (
     ToolStarted,
 )
 from core.features.catalogue import catalogue
+from core.features.needs import ASKED, Ask, missing, update
 from core.features.prefetch import planned_calls
 from core.features.registry import FeatureRegistry
 from core.features.router import FeatureRouter
@@ -239,7 +243,8 @@ class Orchestrator:
         top = stack.top
         waiting = await self.runner.current(conversation_id) if top and top.procedure else None
         step = waiting[1] if waiting else None
-        reading = certain(stack, text, mentioned, reply_as, feature_id, subject_id, step)
+        gives = top is not None and top.awaiting and self._gives(top, text, mentioned)
+        reading = certain(stack, text, mentioned, reply_as, feature_id, subject_id, step, gives)
         if reading is None and not mentioned and stack.top is not None and not stack.top.procedure:
             reading = await self._continues(text, stack, turn, timer)
         if reading is None:
@@ -575,8 +580,16 @@ class Orchestrator:
         )
         entities = {k: v for k, v in frame.entities.items() if k != DOCUMENT}
         answer: Answer | None = None
-        if not upload_text and _lacks_details(feature, text, entities):
-            events: AsyncIterator[Event] = _say(feature.ask_for)
+        # What this message gives; on a new subject, also what it starts with (inherited).
+        seen = entities_in(text, self.entity_types, stack.names) if frame.details else entities
+        details = update(feature, frame.details, text, seen)
+        wanted = None if upload_text else missing(feature, details)
+        if wanted is not None:
+            details[ASKED] = wanted.asked
+            events: AsyncIterator[Event] = _asking(wanted)
+            requires_citation, results = False, []
+        elif not upload_text and _lacks_details(feature, text, entities):
+            events = _say(feature.ask_for)
             requires_citation, results = False, []
         else:
             template = self.templates[feature.template]
@@ -593,6 +606,7 @@ class Orchestrator:
                 question=text,
                 search_text=search,
                 entities=entities,
+                details=details,
                 messages=build_messages(self.system_prompt, feature, history, text),
                 model=TimedModel(TracedModel(self.model, turn), timer),
                 gateway=self.gateway,
@@ -666,6 +680,8 @@ class Orchestrator:
                 .with_related(_pointed_to(results, self.entity_types))
                 .with_exchange(text, answer.text)
             )
+        if feature.needs is not None:
+            kept = replace(kept, details=details, awaiting=wanted is not None)
         if feature.template == PROCEDURE_TEMPLATE and await self.playbooks.get_run(conversation_id):
             kept = replace(kept, procedure=True)
         if _passing(self.templates.get(feature.template)):
@@ -727,19 +743,19 @@ class Orchestrator:
         timer: TurnTimer,
     ) -> AsyncIterator[Event]:
         """Staff picked a kind of help to start, after the assistant asked them what they need:
-        it becomes the subject, and asks what they want from it (its `ask_for`, or an example).
-        No model, no lookup: their next message is about it."""
+        it becomes the subject, and asks what they want from it (what it needs first, its
+        `ask_for`, or an example). No model, no lookup: their next message is about it."""
         feature = await self._resolve(caller, conversation_id, text, feature_id)
-        stack.push(feature.id, {})
+        wanted = missing(feature, {})
+        frame = stack.push(feature.id, {})
+        stack.put(replace(frame, awaiting=wanted is not None))
         if stack.procedure_frame() is not None:
             await self.runner.pause(conversation_id)  # it waits below the new subject
         await self.conversations.append(conversation_id, Message("user", text))
         examples = (*feature.suggestions, *feature.route_examples)
         example = EXAMPLE.format(example=examples[0]) if examples else ""
-        reply = feature.ask_for or START + example
-        async for event in self._finish(
-            caller, conversation_id, feature.id, _say(reply), timer=timer
-        ):
+        events = _asking(wanted) if wanted else _say(feature.ask_for or START + example)
+        async for event in self._finish(caller, conversation_id, feature.id, events, timer=timer):
             yield event
         await self.conversations.save_context(conversation_id, stack.as_dict())
 
@@ -791,12 +807,23 @@ class Orchestrator:
         has one. Another transfer would have to be named; unnamed, a new subject could only ask
         "which one?" ("was it reversed?" after a transfer is that transfer)."""
         feature = self._feature(frame.feature_id)
+        if feature.needs is not None:  # the message alone is not enough to look up; with it, it is
+            alone = update(feature, {}, text, entities_in(text, self.entity_types))
+            had = {k: v for k, v in frame.details.items() if k != ASKED}
+            return missing(feature, alone) is not None and missing(feature, had) is None
         return bool(
             feature.ask_for
             and feature.prefetch
             and not planned_calls(feature, text, {})
             and planned_calls(feature, text, frame.entities)
         )
+
+    def _gives(self, frame: Frame, text: str, mentioned: Mapping[str, str]) -> bool:
+        """The message gives something `frame`'s feature asked for or needs: a value, the way
+        to find it, which detail a value is."""
+        feature = self._feature(frame.feature_id)
+        had = {k: v for k, v in frame.details.items() if k != ASKED}
+        return update(feature, frame.details, text, mentioned) != had
 
     async def _continues(
         self, text: str, stack: ContextStack, turn: Trace, timer: TurnTimer
@@ -1145,6 +1172,14 @@ def _pointed_to(results: Sequence[ToolResult], types: Sequence[EntityType]) -> d
 
 async def _say(text: str) -> AsyncIterator[Event]:
     yield TextDelta(text)
+
+
+async def _asking(wanted: Ask) -> AsyncIterator[Event]:
+    """Ask for what a feature needs: in words, and for a choice, its values to pick."""
+    yield TextDelta(wanted.question)
+    if wanted.choices:
+        choices = tuple(Choice("detail", title) for _, title in wanted.choices)
+        yield Clarify(wanted.question, choices, "detail")
 
 
 def _once(choices: Sequence[Choice]) -> list[Choice]:

@@ -66,10 +66,12 @@ class Choice:
     - `subject`: about an open subject (`subject_id`, with its feature);
     - `resume`: back to the paused procedure;
     - `feature`: a new subject for a kind of help (`feature_id`);
-    - `new`: something else, read afresh.
+    - `new`: something else, read afresh;
+    - `detail`: a value the subject on top asked for (which system to look in): its title is
+      sent as the reply.
     """
 
-    kind: Literal["answer", "subject", "resume", "feature", "new"]
+    kind: Literal["answer", "subject", "resume", "feature", "new", "detail"]
     title: str
     subject_id: int | None = None
     feature_id: str | None = None
@@ -89,8 +91,9 @@ class Clarify:
 # Why the assistant asked: the reading could not tell what the message is (`unread`), nor whether
 # it is about an open subject or another of its kind (`same_or_new`); the conversation model
 # named several kinds of help (`ask_which`), made no valid choice (`no_valid_call`), or talked
-# with staff, the kinds of help offered with its words (`talk`).
-ClarifyReason = Literal["unread", "same_or_new", "ask_which", "no_valid_call", "talk"]
+# with staff, the kinds of help offered with its words (`talk`); or a kind of help asked for a
+# value it needs, to pick (`detail`): not unclear, just not given yet.
+ClarifyReason = Literal["unread", "same_or_new", "ask_which", "no_valid_call", "talk", "detail"]
 
 
 Event = (

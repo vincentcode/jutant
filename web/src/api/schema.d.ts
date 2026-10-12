@@ -307,7 +307,7 @@ export interface components {
             /** Preferred Feature Id */
             preferred_feature_id?: string | null;
             /** Reply As */
-            reply_as?: ("answer" | "question" | "resume" | "stop" | "return" | "continue" | "start") | null;
+            reply_as?: ("answer" | "question" | "resume" | "stop" | "return" | "continue" | "start" | "detail") | null;
             /** Subject Id */
             subject_id?: number | null;
             /** Picked */

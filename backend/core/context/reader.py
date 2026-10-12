@@ -31,8 +31,9 @@ Action = Literal["continue", "return", "new", "stop"]
 # What staff say a message is, so it is not read: a step answer clicked on its card, the answer
 # to "is that your answer or a new question?" or "is this about X, or something new?", the
 # paused procedure's Resume and Stop, a subject chip clicked to return to it, or a kind of help
-# picked to start (`start`, with the feature: the message is its title, not a question).
-ReplyAs = Literal["answer", "question", "resume", "stop", "return", "continue", "start"]
+# picked to start (`start`, with the feature: the message is its title, not a question), or a
+# value picked when the subject on top asked for what it needs (`detail`).
+ReplyAs = Literal["answer", "question", "resume", "stop", "return", "continue", "start", "detail"]
 
 INSTRUCTION = (
     "A staff member is working with an assistant. Their open subjects, most recent first:\n"
@@ -70,10 +71,12 @@ def certain(
     locked_feature: str | None,
     subject_id: int | None = None,
     step: PlaybookStep | None = None,
+    gives_detail: bool = False,
 ) -> Reading | None:
     """The reading, when it does not need the model; else None. `subject_id`: the subject staff
     clicked (to return to it, or to say a message is about it); `step`: the step the top
-    procedure waits on, if any."""
+    procedure waits on, if any; `gives_detail`: the message gives something the subject on top
+    asked for (a phone number, a date)."""
     top, procedure = stack.top, stack.procedure_frame()
     if reply_as == "return" and subject_id is not None and stack.get(subject_id) is not None:
         return Reading("return", subject_id, by="staff")
@@ -85,6 +88,8 @@ def certain(
         return Reading("continue", procedure.id, by="staff")
     if procedure is not None and reply_as == "resume":
         return Reading("return", procedure.id, by="staff")
+    if reply_as == "detail" and top is not None and not top.procedure:
+        return Reading("continue", top.id, by="staff")
     if reply_as == "question":
         return Reading("new", feature_id=locked_feature, by="staff")
     if top is None:
@@ -97,6 +102,9 @@ def certain(
         return Reading("new", feature_id=locked_feature, by="locked")
     if top.procedure and step is not None and _takes(step, text):
         return Reading("continue", top.id, by="step")
+    if not top.procedure and top.awaiting and gives_detail:
+        # it asked for what it needs, and this gives some: the reply, even naming a new entity
+        return Reading("continue", top.id, by="detail")
     if not top.procedure and not top.exchanges and not top.entities and not mentioned:
         # staff just started this kind of help (picked it): the message is its first question
         return Reading("continue", top.id, by="started")

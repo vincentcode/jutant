@@ -27,8 +27,9 @@ class RouteDef(BaseModel):
 
 
 class ArgumentDef(BaseModel):
-    """One argument of a prefetched call: `{question: true}`, `{match: '<regex>'}` or
-    `{value: ...}`."""
+    """One argument of a prefetched call: `{question: true}`, `{match: '<regex>'}`,
+    `{value: ...}`, `{entity: <type>}`, `{choose: {...}}` or `{detail: <name>}`; with
+    `optional: true`, left out when it has no value."""
 
     question: bool = False
     match: str | None = None
@@ -36,6 +37,8 @@ class ArgumentDef(BaseModel):
     entity: str | None = None  # an entity type the pack declares: the conversation's current one
     # value -> what it means: the model picks the one the question is about, or none
     choose: dict[str, str] = {}
+    detail: str | None = None  # one of the feature's details, once staff gave it
+    optional: bool = False
 
     @model_validator(mode="after")
     def _exactly_one(self) -> "ArgumentDef":
@@ -45,10 +48,42 @@ class ArgumentDef(BaseModel):
             self.value is not None,
             self.entity,
             self.choose,
+            self.detail,
         )
         if sum(bool(g) for g in given) != 1:
-            raise ValueError("set exactly one of question, match, value, entity or choose")
+            raise ValueError("set exactly one of question, match, value, entity, choose or detail")
         return self
+
+
+class DetailDef(BaseModel):
+    """Something a feature must know before it looks anything up: an entity's id, one of the
+    values listed in `choose` (value: title), or a date."""
+
+    label: str  # "the customer's phone number": used to ask for it
+    entity: str | None = None
+    choose: dict[str, str] = {}
+    words: dict[str, list[str]] = {}  # value -> other words that name it in a message
+    date: bool = False
+    ask: str = ""  # the question asking for it alone
+    title: str = ""  # its name on a button: "Phone number"
+
+    @model_validator(mode="after")
+    def _exactly_one(self) -> "DetailDef":
+        if sum(bool(g) for g in (self.entity, self.choose, self.date)) != 1:
+            raise ValueError("set exactly one of entity, choose or date")
+        if unknown := sorted(set(self.words) - set(self.choose)):
+            raise ValueError(f"words name values not in choose: {', '.join(unknown)}")
+        return self
+
+
+class NeedsDef(BaseModel):
+    """Which details a feature needs: `first`, asked one at a time; then any one complete set of
+    `one_of`, or with `by` (a detail asked first), of `one_of_by` for its value."""
+
+    first: list[str] = []
+    one_of: list[list[str]] = []
+    by: str | None = None
+    one_of_by: dict[str, list[list[str]]] = {}
 
 
 class EntityDef(BaseModel):
@@ -81,6 +116,9 @@ class FeatureDef(BaseModel):
     ask_for: str = ""
     # Where follow-ups to this feature's answers go, if not to itself.
     follow_ups: str = ""
+    # What it must know before looking anything up, by name; asked for in code when missing.
+    details: dict[str, DetailDef] = {}
+    needs: NeedsDef | None = None
 
 
 class Classification(BaseModel):

@@ -131,12 +131,19 @@ export function ChatPage() {
 
   /** Staff picked what a message is, when the assistant could not tell: it is sent again
    * saying so. When the assistant had asked them in words what they need ("How can I help?"),
-   * there is nothing to send again: the kind of help picked starts, and asks what they need. */
+   * there is nothing to send again: the kind of help picked starts, and asks what they need.
+   * When it asked for a value it needs (which channel), the value picked is staff's reply. */
   async function pick(text: string, choice: Choice, picked: number) {
     if (state.clarifyReason === 'talk' && choice.kind === 'feature') {
       const id = await ensureConversation()
       setStreamFor(id)
       void send(id, { text: choice.title, feature_id: choice.feature_id ?? undefined, reply_as: 'start', picked })
+      return
+    }
+    if (choice.kind === 'detail') {
+      const id = await ensureConversation()
+      setStreamFor(id)
+      void send(id, { text: choice.title, reply_as: 'detail', picked })
       return
     }
     switch (choice.kind) {

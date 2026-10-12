@@ -126,9 +126,11 @@ class AskRequest(BaseModel):
     # During a procedure, what staff say the message is, so it is not read by the model: an
     # answer clicked on the step card, the reply to "your answer or a new question?", or the
     # paused procedure's Resume and Stop. Or "start": a kind of help staff picked (feature_id)
-    # after the assistant asked them what they need; the text is its title.
+    # after the assistant asked them what they need; the text is its title. Or "detail": a value
+    # staff picked when the assistant asked for one it needs (the text is its title).
     reply_as: (
-        Literal["answer", "question", "resume", "stop", "return", "continue", "start"] | None
+        Literal["answer", "question", "resume", "stop", "return", "continue", "start", "detail"]
+        | None
     ) = None
     # With reply_as "return": the subject chip staff clicked. With "continue": the subject staff
     # said the message is about, answering "is this about X, or something new?".
