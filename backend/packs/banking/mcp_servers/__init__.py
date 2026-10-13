@@ -20,6 +20,9 @@ def build_servers(
     engine: PolicyEngine, secret: str, mode: str | None = None
 ) -> dict[str, GuardedServer]:
     """Every server of the pack, by name, on the fake or real bank systems."""
+    from packs.banking.mcp_servers.accounts.tools import create_server as accounts_server
+    from packs.banking.mcp_servers.cards.tools import create_server as cards_server
+    from packs.banking.mcp_servers.lending.tools import create_server as lending_server
     from packs.banking.mcp_servers.services.tools import create_server as services_server
     from packs.banking.mcp_servers.transactions.tools import create_server as transactions_server
 
@@ -28,7 +31,18 @@ def build_servers(
         "transactions": transactions_server(
             TransactionService(systems.transactions, systems.banking), engine, secret
         ),
-        "services": services_server(systems.banking, systems.catalog, engine, secret),
+        "services": services_server(
+            systems.banking,
+            systems.catalog,
+            engine,
+            secret,
+            customers=systems.customers,
+            lending=systems.lending,
+            cards=systems.cards,
+        ),
+        "accounts": accounts_server(systems.accounts, engine, secret),
+        "lending": lending_server(systems.lending, systems.banking, engine, secret),
+        "cards": cards_server(systems.cards, systems.banking, engine, secret),
     }
 
 

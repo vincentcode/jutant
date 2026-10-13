@@ -21,12 +21,17 @@ from starlette.routing import Route
 
 from packs.banking.adapters.base import NotFound
 from packs.banking.adapters.fake import FakeCoreBanking, FakeServiceCatalog
+from packs.banking.adapters.fake_accounts import FakeAccountServices, FakeCustomerRecords
+from packs.banking.adapters.fake_cards import FakeCards
+from packs.banking.adapters.fake_lending import FakeLending
 
 Handler = Callable[[Request], Awaitable[Any]]
 
 
 def create_app(token: str | None = None) -> Starlette:
     banking, catalog = FakeCoreBanking(), FakeServiceCatalog()
+    accounts, customers = FakeAccountServices(), FakeCustomerRecords()
+    lending, cards = FakeLending(), FakeCards()
 
     def endpoint(handler: Handler) -> Callable[[Request], Awaitable[JSONResponse]]:
         async def respond(request: Request) -> JSONResponse:
@@ -68,8 +73,71 @@ def create_app(token: str | None = None) -> Starlette:
     async def requests(request: Request) -> Any:
         return await catalog.open_requests(request.path_params["number"])
 
+    async def status(request: Request) -> Any:
+        return await accounts.get_status(request.path_params["number"])
+
+    async def mandate(request: Request) -> Any:
+        return await accounts.get_mandate(request.path_params["number"])
+
+    async def charges(request: Request) -> Any:
+        query = request.query_params
+        filters: dict[str, Any] = {"limit": int(query.get("limit", 10))}
+        for name in ("from_date", "to_date"):
+            if query.get(name):
+                filters[name] = query[name]
+        return await accounts.list_charges(request.path_params["number"], **filters)
+
+    async def standing_orders(request: Request) -> Any:
+        return await accounts.list_standing_orders(request.path_params["number"])
+
+    async def cheque(request: Request) -> Any:
+        params = request.path_params
+        return await accounts.get_cheque(params["number"], params["cheque"])
+
+    async def kyc(request: Request) -> Any:
+        return await customers.get_kyc(request.path_params["number"])
+
+    async def loans(request: Request) -> Any:
+        return await lending.list_loans(request.path_params["number"])
+
+    async def loan(request: Request) -> Any:
+        return await lending.get_loan(request.path_params["loan_id"])
+
+    async def schedule(request: Request) -> Any:
+        return await lending.get_schedule(request.path_params["loan_id"])
+
+    async def deposits(request: Request) -> Any:
+        return await lending.list_deposits(request.path_params["number"])
+
+    async def deposit(request: Request) -> Any:
+        return await lending.get_deposit(request.path_params["deposit_id"])
+
+    async def customer_cards(request: Request) -> Any:
+        return await cards.list_cards(request.path_params["number"])
+
+    async def card(request: Request) -> Any:
+        return await cards.get_card(request.path_params["card_id"])
+
+    async def authorisations(request: Request) -> Any:
+        limit = int(request.query_params.get("limit", 10))
+        return await cards.recent_authorisations(request.path_params["card_id"], limit)
+
     return Starlette(
         routes=[
+            Route("/accounts/{number}/status", endpoint(status)),
+            Route("/accounts/{number}/mandate", endpoint(mandate)),
+            Route("/accounts/{number}/charges", endpoint(charges)),
+            Route("/accounts/{number}/standing-orders", endpoint(standing_orders)),
+            Route("/accounts/{number}/cheques/{cheque}", endpoint(cheque)),
+            Route("/customers/{number}/kyc", endpoint(kyc)),
+            Route("/customers/{number}/loans", endpoint(loans)),
+            Route("/customers/{number}/deposits", endpoint(deposits)),
+            Route("/customers/{number}/cards", endpoint(customer_cards)),
+            Route("/loans/{loan_id}", endpoint(loan)),
+            Route("/loans/{loan_id}/schedule", endpoint(schedule)),
+            Route("/deposits/{deposit_id}", endpoint(deposit)),
+            Route("/cards/{card_id}", endpoint(card)),
+            Route("/cards/{card_id}/authorisations", endpoint(authorisations)),
             Route("/accounts/{number}", endpoint(account)),
             Route("/accounts/{number}/transactions", endpoint(transactions)),
             Route("/transactions/{reference}", endpoint(transaction)),

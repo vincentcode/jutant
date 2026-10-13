@@ -71,10 +71,32 @@ services:
       <<: *mcp-health
       test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 8103), 2)"]
 
+  mcp-accounts:
+    <<: *python
+    command: python -m packs.banking.mcp_servers.accounts.server
+    healthcheck:
+      <<: *mcp-health
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 8104), 2)"]
+
+  mcp-lending:
+    <<: *python
+    command: python -m packs.banking.mcp_servers.lending.server
+    healthcheck:
+      <<: *mcp-health
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 8105), 2)"]
+
+  mcp-cards:
+    <<: *python
+    command: python -m packs.banking.mcp_servers.cards.server
+    healthcheck:
+      <<: *mcp-health
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 8106), 2)"]
+
   # A stand-in for the bank's systems, serving the fake bank over HTTP, to run the real
   # clients (JUTANT_BANKING_ADAPTERS=real) before the bank is reachable. Start it with
   #   docker compose -f infra/docker-compose.yml --profile mock-bank up -d
-  # and point JUTANT_CORE_BANKING_URL and JUTANT_SERVICE_CATALOG_URL at http://mock-bank:8190.
+  # and point JUTANT_CORE_BANKING_URL, JUTANT_SERVICE_CATALOG_URL, JUTANT_LENDING_URL and
+  # JUTANT_CARDS_URL at http://mock-bank:8190.
   mock-bank:
     <<: *python
     command: python -m packs.banking.mock_bank
@@ -98,6 +120,9 @@ services:
       mcp-documents: {condition: service_healthy}
       mcp-transactions: {condition: service_healthy}
       mcp-services: {condition: service_healthy}
+      mcp-accounts: {condition: service_healthy}
+      mcp-lending: {condition: service_healthy}
+      mcp-cards: {condition: service_healthy}
       ollama: {condition: service_started, required: false}
     healthcheck:
       test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 8000), 2)"]

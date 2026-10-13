@@ -54,7 +54,7 @@ async def test_pack_passes_the_contract(pack_dir: Path) -> None:
 def test_banking_pack_loads_its_content() -> None:
     pack = load_pack(PACKS_DIR / "banking")
     assert pack.manifest.name == "banking"
-    assert len(pack.features) == 9  # eight kinds of help, and conversation
+    assert len(pack.features) == 12  # eleven kinds of help, and conversation
     assert {p.id for p in pack.playbooks} == {"blocked_card", "dormant_account", "failed_transfer"}
     assert pack.system_prompt.startswith("You are the Bank Staff Assistant.")
     assert all(f.prompt for f in pack.features)

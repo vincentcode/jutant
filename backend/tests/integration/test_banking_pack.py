@@ -65,7 +65,10 @@ async def test_teller_asks_why_a_transfer_failed() -> None:
     )
     async with banking_assistant(model) as assistant:
         events = await collect_events(
-            assistant.ask(staff(), uuid4(), "Why did TX-0002 fail?", "transaction_lookup")
+            # With the channel said: transaction lookup asks for it first (the guided trial).
+            assistant.ask(
+                staff(), uuid4(), "Why did branch transfer TX-0002 fail?", "transaction_lookup"
+            )
         )
 
     answer = events[-1].answer
@@ -179,3 +182,23 @@ async def test_the_procedure_cannot_look_up_another_branchs_transfer() -> None:
     assert "Beneficiary" not in text  # nothing of the record is shown
     [step] = [e.step for e in events if isinstance(e, PlaybookStepShown)]
     assert step.order == 1
+
+
+async def test_blocked_card_procedure_shows_the_cards_status_and_reason() -> None:
+    """The card is looked up with the id staff give, and the step asking for the block reason
+    quotes what the card system records."""
+    model = FakeModel(replies=[ModelReply("blocked_card")])  # which procedure; nothing else
+    conversation = uuid4()
+    kojo = staff("teller", "KSI-02")  # CRD-3002 belongs to a KSI-02 customer
+    async with banking_assistant(model) as assistant:
+        await collect_events(
+            assistant.ask(kojo, conversation, "The card is blocked", "troubleshooting")
+        )
+        await collect_events(assistant.ask(kojo, conversation, "done", reply_as="answer"))
+        events = await collect_events(assistant.ask(kojo, conversation, "It is CRD-3002"))
+
+    step = [e for e in events if isinstance(e, PlaybookStepShown)][-1].step
+    assert step.title == "Find the block reason"
+    assert "5399 **** **** 8842 is blocked" in step.instruction
+    assert "PIN tries exceeded" in step.instruction
+    assert len(model.calls) == 1

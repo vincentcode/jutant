@@ -13,21 +13,37 @@ from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
 import httpx
 import pytest
 
-from packs.banking.adapters import CORE_CHANNELS, BankSystems
+from packs.banking.adapters import CORE_CHANNELS, BankSystems, build
+from packs.banking.adapters.account_services import (
+    HttpAccountServicesClient,
+    HttpCustomerRecordsClient,
+)
 from packs.banking.adapters.base import (
     Account,
+    AccountStatus,
+    Authorisation,
+    Card,
+    Charge,
+    Cheque,
     Customer,
+    Deposit,
+    Instalment,
+    Kyc,
+    Loan,
+    Mandate,
     NotFound,
     OpenRequest,
     Product,
     ProductMatch,
     Requirements,
+    StandingOrder,
     Transaction,
 )
+from packs.banking.adapters.cards import HttpCardsClient
 from packs.banking.adapters.core_banking import HttpCoreBankingClient
 from packs.banking.adapters.core_banking_source import CoreBankingTransactions
-from packs.banking.adapters.fake import FakeCoreBanking, FakeServiceCatalog
 from packs.banking.adapters.http import BankHttp, Connection
+from packs.banking.adapters.lending import HttpLendingClient
 from packs.banking.adapters.service_catalog import HttpServiceCatalogClient
 from packs.banking.mock_bank import create_app
 
@@ -37,22 +53,26 @@ DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 @asynccontextmanager
 async def fake() -> AsyncIterator[BankSystems]:
-    yield BankSystems(FakeCoreBanking(), FakeServiceCatalog())
+    yield build("fake")
 
 
 @asynccontextmanager
 async def http_on_mock_bank() -> AsyncIterator[BankSystems]:
     transport = httpx.ASGITransport(app=create_app(token="t0ken"))
     connection = Connection("http://mock-bank", auth="bearer", token="t0ken")
-    banking, catalog = (
-        BankHttp(connection, transport=transport),
-        BankHttp(connection, transport=transport),
-    )
+    banking, catalog, lending, cards = (BankHttp(connection, transport=transport) for _ in range(4))
     try:
-        yield BankSystems(HttpCoreBankingClient(banking), HttpServiceCatalogClient(catalog))
+        yield BankSystems(
+            HttpCoreBankingClient(banking),
+            HttpServiceCatalogClient(catalog),
+            HttpAccountServicesClient(banking),
+            HttpCustomerRecordsClient(banking),
+            HttpLendingClient(lending),
+            HttpCardsClient(cards),
+        )
     finally:
-        await banking.close()
-        await catalog.close()
+        for http in (banking, catalog, lending, cards):
+            await http.close()
 
 
 CLIENTS: dict[str, Callable[[], Any]] = {"fake": fake, "http": http_on_mock_bank}
@@ -88,6 +108,9 @@ def _matches(value: Any, hint: Any) -> bool:
         )
     if hint is type(None):
         return value is None
+    if hasattr(hint, "__required_keys__"):  # a record inside a record: a hold, a signatory
+        assert_shape(value, hint)
+        return True
     return isinstance(value, hint)
 
 
@@ -206,3 +229,98 @@ async def test_core_banking_is_a_transaction_source(bank: BankSystems) -> None:
     assert [r["reference"] for r in dated] == ["TX-0002"]
     assert await source.search({"reference": "TX-9999"}) == []
     assert await source.search({"account_number": "9999999999"}) == []
+
+
+# --- account services -------------------------------------------------------------------------
+
+
+async def test_an_account_status_with_its_holds(bank: BankSystems) -> None:
+    status = await bank.accounts.get_status("0011223344")
+    assert_shape(status, AccountStatus)
+    assert [h["type"] for h in status["holds"]] == ["lien", "uncleared_funds"]
+    assert MONEY.match(status["available_balance"])
+    dormant = await bank.accounts.get_status("0099887766")
+    assert dormant["debits_blocked"] is True and dormant["holds"][0]["amount"] is None
+
+
+async def test_a_mandate_names_its_signatories(bank: BankSystems) -> None:
+    mandate = await bank.accounts.get_mandate("0011223355")
+    assert_shape(mandate, Mandate)
+    assert [s["name"] for s in mandate["signatories"]] == ["Ama Mensah", "Yaw Mensah"]
+
+
+async def test_charges_are_negative_newest_first_and_filtered(bank: BankSystems) -> None:
+    charges = await bank.accounts.list_charges("0011223344")
+    for charge in charges:
+        assert_shape(charge, Charge)
+        assert charge["amount"].startswith("-")
+    assert [c["fee_code"] for c in charges][0] == "F12"
+    september = await bank.accounts.list_charges("0011223344", to_date="2026-09-30")
+    assert {c["fee_code"] for c in september} == {"F01", "F07"}
+
+
+async def test_standing_orders_say_when_the_last_run_failed(bank: BankSystems) -> None:
+    orders = await bank.accounts.list_standing_orders("0011223344")
+    for order in orders:
+        assert_shape(order, StandingOrder)
+    failed = next(o for o in orders if o["id"] == "SO-301")
+    assert failed["last_result"] == "failed" and failed["failure_reason"]
+
+
+async def test_a_returned_cheque_gives_its_code(bank: BankSystems) -> None:
+    cheque = await bank.accounts.get_cheque("0011223344", "000102")
+    assert_shape(cheque, Cheque)
+    assert (cheque["status"], cheque["return_code"]) == ("returned", "R01")
+    with pytest.raises(NotFound):
+        await bank.accounts.get_cheque("0011223344", "999999")
+
+
+async def test_a_customers_kyc_record(bank: BankSystems) -> None:
+    kyc = await bank.customers.get_kyc("C1002")
+    assert_shape(kyc, Kyc)
+    assert kyc["status"] == "review_due" and kyc["missing_documents"] == ["proof of address"]
+
+
+# --- lending ------------------------------------------------------------------------------------
+
+
+async def test_a_customers_loans_and_one_loans_schedule(bank: BankSystems) -> None:
+    loans = await bank.lending.list_loans("C1001")
+    for loan in loans:
+        assert_shape(loan, Loan)
+    assert sorted(loan["loan_id"] for loan in loans) == ["LN-1001", "LN-1003"]
+    behind = await bank.lending.get_loan("LN-1002")
+    assert (behind["status"], behind["days_past_due"]) == ("in_arrears", 47)
+    schedule = await bank.lending.get_schedule("LN-1002")
+    for instalment in schedule:
+        assert_shape(instalment, Instalment)
+    assert [i["due_date"] for i in schedule] == sorted(i["due_date"] for i in schedule)
+
+
+async def test_deposits(bank: BankSystems) -> None:
+    [deposit] = await bank.lending.list_deposits("C1001")
+    assert_shape(deposit, Deposit)
+    assert (await bank.lending.get_deposit("FD-2002"))["status"] == "matured"
+    assert await bank.lending.list_deposits("C9999") == []
+    with pytest.raises(NotFound):
+        await bank.lending.get_loan("LN-9999")
+
+
+# --- cards --------------------------------------------------------------------------------------
+
+
+async def test_cards_are_masked_and_say_why_blocked(bank: BankSystems) -> None:
+    cards = await bank.cards.list_cards("C1001")
+    for card in cards:
+        assert_shape(card, Card)
+        assert re.fullmatch(r"\d{4} \*{4} \*{4} \d{4}", card["masked_number"])
+    blocked = await bank.cards.get_card("CRD-3002")
+    assert (blocked["status"], blocked["block_reason"]) == ("blocked", "PIN tries exceeded")
+
+
+async def test_recent_attempts_newest_first_with_codes(bank: BankSystems) -> None:
+    attempts = await bank.cards.recent_authorisations("CRD-3001", 3)
+    for attempt in attempts:
+        assert_shape(attempt, Authorisation)
+    assert len(attempts) == 3 and attempts[0]["date"] >= attempts[-1]["date"]
+    assert {a["response_code"] for a in attempts if a["result"] == "declined"} == {"57", "61"}
