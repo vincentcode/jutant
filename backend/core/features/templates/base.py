@@ -130,7 +130,7 @@ async def tool_loop(
     messages = list(ctx.messages)
     tools = ctx.gateway.catalog.specs_for(ctx.feature.tools)
     made: set[tuple[str, str]] = set()
-    chosen = await chosen_calls(ctx.model, ctx.feature, ctx.question, ctx.entities)
+    chosen = await chosen_calls(ctx.model, ctx.feature, ctx.question, ctx.entities, ctx.details)
     rounds = (
         lambda: [
             *planned_calls(ctx.feature, ctx.lookup, ctx.entities, ctx.details),

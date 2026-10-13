@@ -139,6 +139,9 @@ class Prefetch:
 
     tool: str
     arguments: dict[str, ArgumentSource]
+    # What a question is about for this call to be the one it needs: of a feature's calls with
+    # a `when`, the model picks the one (or none) a question needs, and only that one is made.
+    when: str = ""
 
 
 @dataclass(frozen=True)

@@ -97,6 +97,9 @@ class EntityDef(BaseModel):
 class PrefetchDef(BaseModel):
     tool: str
     arguments: dict[str, ArgumentDef]
+    # "who may sign on the account": of the calls with a `when`, the model picks the one a
+    # question is about, and only that one is made.
+    when: str = ""
 
 
 class FeatureDef(BaseModel):

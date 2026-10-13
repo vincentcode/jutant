@@ -95,6 +95,7 @@ def load_pack(path: str | Path) -> Pack:
                         )
                         for name, a in p.arguments.items()
                     },
+                    p.when,
                 )
                 for p in f.prefetch
             ),
