@@ -15,20 +15,20 @@ async def test_why_money_cannot_leave_is_set_out_in_code() -> None:
     result = await call("accounts.get_status", account_number="0011223344")
     assert result.ok
     data = result.data
-    assert (data["can_withdraw"], data["available_balance"], data["held_amount"]) == (
+    assert (data["withdrawals_allowed"], data["available_balance"], data["held_amount"]) == (
         True,
         "2220.75",
         "2300.00",
     )
-    assert data["restrictions"][0].startswith("Lien H-501 holds 1500.00 GHS")
+    assert data["why_money_is_held_or_blocked"][0].startswith("Lien H-501 holds 1500.00 GHS")
     assert result.citations == (Citation("record", "Account", "0011223344"),)
 
 
 async def test_a_dormant_account_says_nothing_may_leave() -> None:
     manager = staff("branch_manager", "ACC-01")  # any branch
     result = await call("accounts.get_status", manager, account_number="0099887766")
-    assert result.data["can_withdraw"] is False
-    assert result.data["restrictions"][:2] == [
+    assert result.data["withdrawals_allowed"] is False
+    assert result.data["why_money_is_held_or_blocked"][:2] == [
         "No money may leave the account (debits are blocked).",
         "The account is dormant since 2025-04-10.",
     ]
