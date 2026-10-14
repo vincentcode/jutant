@@ -40,7 +40,9 @@ async def test_conversations_can_be_searched_renamed_and_deleted_by_their_owner(
     async with api(*replies) as client:
         await client.login("ama")
         transfer = await client.conversation()
-        await client.ask(transfer, text="Why did TX-0002 fail?", feature_id="transaction_lookup")
+        await client.ask(
+            transfer, text="Why did branch transfer TX-0002 fail?", feature_id="transaction_lookup"
+        )
         product = await client.conversation()
         await client.ask(product, text="Rate on SAV-STD?", feature_id="product_lookup")
 

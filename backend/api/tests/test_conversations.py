@@ -20,7 +20,7 @@ async def test_features_offered_depend_on_the_role() -> None:
         service = {f["id"] for f in (await client.http.get("/api/features")).json()}
     assert "customer_360" not in teller
     assert "customer_360" in service
-    assert len(teller) == 7
+    assert len(teller) == 9  # with account services and cards
 
 
 async def test_start_list_and_read_back_a_conversation_with_citations() -> None:
@@ -33,15 +33,17 @@ async def test_start_list_and_read_back_a_conversation_with_citations() -> None:
         await client.login("ama")
         conversation_id = await client.conversation()
         await client.ask(
-            conversation_id, text="Why did TX-0002 fail?", feature_id="transaction_lookup"
+            conversation_id,
+            text="Why did branch transfer TX-0002 fail?",
+            feature_id="transaction_lookup",
         )
 
         listed = (await client.http.get("/api/conversations")).json()
         history = (await client.http.get(f"/api/conversations/{conversation_id}/messages")).json()
 
-    assert [c["title"] for c in listed] == ["Why did TX-0002 fail?"]
+    assert [c["title"] for c in listed] == ["Why did branch transfer TX-0002 fail?"]
     assert [(m["role"], m["content"]) for m in history] == [
-        ("user", "Why did TX-0002 fail?"),
+        ("user", "Why did branch transfer TX-0002 fail?"),
         ("assistant", "TX-0002 failed: the beneficiary account is closed."),
     ]
     assert history[1]["feature_id"] == "transaction_lookup"

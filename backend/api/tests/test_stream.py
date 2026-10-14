@@ -29,7 +29,7 @@ async def test_a_turn_streams_every_event_in_order() -> None:
         await client.login("ama")
         events = await client.ask(
             await client.conversation(),
-            text="Why did TX-0002 fail?",
+            text="Why did branch transfer TX-0002 fail?",
             feature_id="transaction_lookup",
         )
 
@@ -125,7 +125,14 @@ async def test_health_reports_each_dependency() -> None:
     assert response.json() == {
         "database": True,
         "model": True,
-        "mcp_servers": {"documents": True, "transactions": True, "services": True},
+        "mcp_servers": {
+            "documents": True,
+            "transactions": True,
+            "services": True,
+            "accounts": True,
+            "lending": True,
+            "cards": True,
+        },
     }
 
 
@@ -202,14 +209,14 @@ async def test_a_procedure_reads_replies_pauses_for_questions_and_stops_when_ask
         [asked] = [data for name, data in unclear if name == "clarify"]
         assert asked["choices"][0] == {
             "kind": "answer",
-            "title": "My answer to step 2: Find the block reason",
+            "title": "My answer to step 2: Find the card",
             "subject_id": None,
             "feature_id": "troubleshooting",
         }
 
         await client.ask(
             conversation,
-            text="Why did TX-0002 fail?",
+            text="Why did branch transfer TX-0002 fail?",
             feature_id="transaction_lookup",
             reply_as="question",
         )
@@ -218,7 +225,7 @@ async def test_a_procedure_reads_replies_pauses_for_questions_and_stops_when_ask
             "playbook_id": "blocked_card",
             "playbook_title": "Blocked card",
             "step_order": 2,
-            "step_title": "Find the block reason",
+            "step_title": "Find the card",
             "paused": True,
         }
 
