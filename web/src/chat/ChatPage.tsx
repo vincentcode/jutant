@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { CircleUserRound, ListChecks, X } from 'lucide-react'
+import { rolesOf } from '../shell/SettingsPanel'
 import * as api from '../api/endpoints'
 import type { Upload } from '../api/endpoints'
 import type { Choice } from '../api/events'
@@ -312,7 +313,7 @@ export function ChatPage() {
             type="button"
             className="justify-self-end rounded-full p-1 text-muted hover:bg-hover hover:text-fg"
             aria-label={`Your account: ${me?.display_name ?? ''}`}
-            title={me ? `${me.display_name} · ${me.role.replace(/_/g, ' ')}` : undefined}
+            title={me ? `${me.display_name} · ${rolesOf(me)}` : undefined}
             onClick={() => setPanel(panel === 'settings' ? undefined : 'settings')}
           >
             <CircleUserRound aria-hidden className="size-6" />

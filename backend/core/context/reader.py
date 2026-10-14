@@ -72,11 +72,14 @@ def certain(
     subject_id: int | None = None,
     step: PlaybookStep | None = None,
     gives_detail: bool = False,
+    patterned: str | None = None,
 ) -> Reading | None:
     """The reading, when it does not need the model; else None. `subject_id`: the subject staff
     clicked (to return to it, or to say a message is about it); `step`: the step the top
     procedure waits on, if any; `gives_detail`: the message gives something the subject on top
-    asked for (a phone number, a date)."""
+    asked for (a phone number, a date); `patterned`: the one kind of help whose route pattern
+    the message matches, if one does ("book leave" is a leave request, even said while on the
+    leave balance, or just after picking it)."""
     top, procedure = stack.top, stack.procedure_frame()
     if reply_as == "return" and subject_id is not None and stack.get(subject_id) is not None:
         return Reading("return", subject_id, by="staff")
@@ -105,6 +108,8 @@ def certain(
     if not top.procedure and top.awaiting and gives_detail:
         # it asked for what it needs, and this gives some: the reply, even naming a new entity
         return Reading("continue", top.id, by="detail")
+    if not top.procedure and not mentioned and patterned and patterned != top.feature_id:
+        return Reading("new", feature_id=patterned, by="pattern")
     if not top.procedure and not top.exchanges and not top.entities and not mentioned:
         # staff just started this kind of help (picked it): the message is its first question
         return Reading("continue", top.id, by="started")

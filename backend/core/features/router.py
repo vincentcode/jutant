@@ -98,9 +98,9 @@ class FeatureRouter:
         features this turn may not start (another procedure while one is open). `guess=False`:
         when the model cannot choose, the default feature (`unsure`), not the keywords' pick."""
         model = model or self.model
-        available = [f for f in self.registry.for_role(caller.role) if f.id not in exclude]
+        available = [f for f in self.registry.for_caller(caller) if f.id not in exclude]
         if not available:
-            raise LookupError(f"No features for role {caller.role}")
+            raise LookupError(f"No features for {caller.id} ({caller.role})")
         if len(available) == 1:
             return Route(available[0], "only")
         by_id = {f.id: f for f in available}
@@ -147,6 +147,12 @@ class FeatureRouter:
             and scored[0][0] >= self.min_similarity
             and (scored[0][0] - other >= self.min_margin)
         )
+
+    def by_pattern(self, caller: Caller, text: str) -> Feature | None:
+        """The one feature `caller` may use whose route pattern `text` matches; None if none
+        or several do. Decided in code: what a pattern says is meant."""
+        matched = self._matching(text, self.registry.for_caller(caller))
+        return matched[0] if len(matched) == 1 else None
 
     def _matching(self, text: str, available: Sequence[Feature]) -> list[Feature]:
         return [f for f in available if any(p.search(text) for p in self._patterns[f.id])]

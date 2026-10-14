@@ -2,7 +2,8 @@
 
 1. The tool must be one the routed feature may use (else InvalidToolCall).
 2. The tool must exist in the catalog (else UnknownTool).
-3. Identity-like arguments are removed; the caller travels separately, signed.
+3. Identity-like arguments are removed; the caller travels separately, signed, as the
+   feature's pack sees them (their role there): each pack's servers check their own roles.
 4. The arguments are checked against the tool's JSON schema. Problems come back as an
    `invalid_arguments` result so the model can correct the call.
 5. The call goes to the tool client with the caller attached.
@@ -44,6 +45,11 @@ class ToolGateway:
         if call.name not in feature.tools:
             await self.audit.record(caller, "tool_failed", {**detail, "error": "not_permitted"})
             raise InvalidToolCall(f"{call.name} is not a tool of feature {feature.id}")
+        acting = caller.in_pack(feature.pack)
+        if acting is None:  # no role in the feature's pack: as a refusal by the server
+            await self.audit.record(caller, "tool_denied", {**detail, "error": "no_role_in_pack"})
+            return ToolResult(call_id=call.id, ok=False, error="denied")
+        caller = acting
         spec = self.catalog.get(call.name)
         if spec is None:
             await self.audit.record(caller, "tool_failed", {**detail, "error": "unknown_tool"})

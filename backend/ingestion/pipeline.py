@@ -64,8 +64,15 @@ class Ingestor:
         self.document_prefix = document_prefix  # the embedding model's prefix for documents
 
     async def ingest(
-        self, path: Path, *, doc_type: str, classification: str, title: str | None = None
+        self,
+        path: Path,
+        *,
+        doc_type: str,
+        classification: str,
+        title: str | None = None,
+        pack: str = "",
     ) -> IngestResult:
+        """`pack`: the pack whose questions find it; "" for every pack's."""
         if classification not in self.labels:
             raise IngestError(
                 f"{classification!r} is not a label of this pack ({', '.join(sorted(self.labels))})"
@@ -90,6 +97,7 @@ class Ingestor:
             text=body,
             chunks=chunks,
             embeddings=embeddings,
+            pack=pack,
         )
         status = "replaced" if replaced else "indexed"
         return IngestResult(path, status, document.id, len(chunks), note)

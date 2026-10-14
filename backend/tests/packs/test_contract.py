@@ -32,7 +32,9 @@ def servers_for(pack: Pack) -> dict[str, GuardedServer]:
     engine = PolicyEngine(pack.rules, pack.field_rules)
     build_servers = importlib.import_module(f"packs.{pack.path.name}.mcp_servers").build_servers
     return {
-        "documents": documents_server(None, engine, "", pack.readable_classifications),
+        "documents": documents_server(
+            None, engine, "", lambda caller: pack.readable_classifications(caller.role)
+        ),
         **build_servers(engine, "", "fake"),
     }
 

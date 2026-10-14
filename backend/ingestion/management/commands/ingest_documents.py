@@ -1,6 +1,9 @@
 """Ingest every supported document in a folder.
 
-    python manage.py ingest_documents /data/policies --doc-type policy --classification internal
+    python manage.py ingest_documents /data/policies --doc-type policy --classification internal \
+        --pack banking
+
+`--pack`: the pack whose questions find the documents; without it, every pack's.
 
 Each file is reported as indexed, replaced, skipped or failed; one bad file does not stop the
 rest. The command fails at the end if any file failed.
@@ -25,11 +28,15 @@ class Command(BaseCommand):
             "--classification", required=True, help="one of the pack's labels, e.g. internal"
         )
         parser.add_argument("--recursive", action="store_true", help="include sub-folders")
+        parser.add_argument("--pack", default="", help="the pack they belong to; none: every pack")
 
     def handle(self, *args, **options) -> None:
         folder: Path = options["folder"]
         if not folder.is_dir():
             raise CommandError(f"{folder} is not a folder")
+        packs = setup.pack_names()
+        if options["pack"] and options["pack"] not in packs:
+            raise CommandError(f"--pack must be one of {', '.join(packs)}")
         pattern = "**/*" if options["recursive"] else "*"
         files = sorted(p for p in folder.glob(pattern) if p.suffix.lower() in SUPPORTED)
         if not files:
@@ -48,6 +55,7 @@ class Command(BaseCommand):
                         path,
                         doc_type=options["doc_type"],
                         classification=options["classification"],
+                        pack=options["pack"],
                     )
                 except IngestError as exc:
                     failed += 1

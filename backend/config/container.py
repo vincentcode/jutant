@@ -22,7 +22,9 @@ from core.features.registry import FeatureRegistry
 from core.features.router import FeatureRouter
 from core.observability import TraceContent
 from core.orchestrator.orchestrator import Orchestrator, TurnMode
+from core.packs import deployment as deployments
 from core.packs.contract import check
+from core.packs.deployment import Deployment
 from core.packs.loader import Pack, load_pack
 from core.ports import ModelProvider
 from core.tools.catalog import ToolCatalog
@@ -35,10 +37,18 @@ from providers.ocr.tesseract import TesseractOcr
 from providers.tracing.feedback import FeedbackSink, NoFeedbackSink
 
 
-def resolve_servers(pack: Pack) -> dict[str, str]:
-    """Map each MCP server named in the manifest to its URL."""
+def load_deployment() -> Deployment:
+    """The packs this deployment runs (JUTANT_PACKS), as one assistant."""
+    return deployments.build(
+        [load_pack(path) for path in settings.JUTANT_PACKS], settings.JUTANT_ASSISTANT_NAME
+    )
+
+
+def resolve_servers(source: Pack | Deployment) -> dict[str, str]:
+    """Map each MCP server the packs name to its URL."""
+    refs = source.servers if isinstance(source, Deployment) else source.manifest.mcp_servers
     servers: dict[str, str] = {}
-    for ref in pack.manifest.mcp_servers:
+    for ref in refs:
         name = ref.platform or ref.pack
         if name is None:
             raise ValueError("MCP server reference needs 'platform' or 'pack'")
@@ -48,10 +58,10 @@ def resolve_servers(pack: Pack) -> dict[str, str]:
 
 @dataclass
 class Runtime:
-    """Everything the API serves with: the loaded pack, the orchestrator and the MCP
+    """Everything the API serves with: the loaded packs, the orchestrator and the MCP
     connections behind it, and the stores the API reads directly."""
 
-    pack: Pack
+    deployment: Deployment
     orchestrator: Orchestrator
     tool_client: McpToolClient
     identity: DjangoIdentityProvider
@@ -61,14 +71,25 @@ class Runtime:
     library: DocumentLibrary = field(default_factory=DocumentLibrary)  # the Knowledge panel
     actions: ActionService | None = None  # requests staff send once they confirm them
 
-    async def start(self) -> None:
-        """Connect to the MCP servers, read their tools and check the pack contract.
+    @property
+    def pack(self) -> Pack:
+        """The first pack: the deployment's own conversation is its."""
+        return self.deployment.packs[0]
 
-        The process refuses to start if the pack fails, so a broken pack never serves staff.
+    async def start(self) -> None:
+        """Connect to the MCP servers, read their tools and check every pack's contract, and
+        that the packs can run together.
+
+        The process refuses to start if one fails, so a broken pack never serves staff.
         """
         await self.tool_client.connect()
         await self.orchestrator.load_tools()
-        problems = check(self.pack, self.orchestrator.gateway.catalog.specs)
+        specs = self.orchestrator.gateway.catalog.specs
+        problems = [
+            f"{pack.manifest.name}: {problem}" if len(self.deployment.packs) > 1 else problem
+            for pack in self.deployment.packs
+            for problem in check(pack, specs)
+        ] + deployments.check(self.deployment)
         if problems:
             await self.tool_client.close()
             raise PackContractError(problems)
@@ -93,18 +114,18 @@ def build_runtime(
 ) -> Runtime:
     """The deployment's runtime. Tests pass a fake model and in-process MCP servers instead of
     the configured ones; everything else is wired exactly as deployed."""
-    pack = load_pack(settings.JUTANT_PACK_PATH)
+    deployment = load_deployment()
     model = model or llm_factory.build(settings)
     tool_client = McpToolClient(
-        servers=servers or resolve_servers(pack), secret=settings.JUTANT_CALLER_SECRET
+        servers=servers or resolve_servers(deployment), secret=settings.JUTANT_CALLER_SECRET
     )
     conversations = DjangoConversationStore()
-    registry = FeatureRegistry(pack.features)
+    registry = FeatureRegistry(deployment.features)
     audit = DjangoAuditSink()
     gateway = ToolGateway(tool_client, ToolCatalog(tool_client), audit)
     actions = (
-        ActionService(pack.actions, DjangoActionStore(), tool_client, conversations, audit)
-        if pack.actions
+        ActionService(deployment.actions, DjangoActionStore(), tool_client, conversations, audit)
+        if deployment.actions
         else None
     )
     orchestrator = Orchestrator(
@@ -117,7 +138,7 @@ def build_runtime(
         router=FeatureRouter(
             model,
             registry,
-            default=pack.manifest.default_feature,
+            default=deployment.default_feature,
             embed_prefix=settings.JUTANT_EMBED_ROUTE_PREFIX,
             min_similarity=settings.JUTANT_ROUTE_MIN_SIMILARITY,
             min_margin=settings.JUTANT_ROUTE_MIN_MARGIN,
@@ -125,22 +146,23 @@ def build_runtime(
         gateway=gateway,
         max_steps=settings.JUTANT_MAX_STEPS,
         history_limit=settings.JUTANT_HISTORY_LIMIT,
-        system_prompt=pack.system_prompt,
-        extraction_schemas=pack.extraction_schemas,
+        system_prompt=deployment.system_prompt,
+        system_prompts=deployment.system_prompts,
+        extraction_schemas=deployment.extraction_schemas,
         tracer=tracing.build(settings),
         trace_content=TraceContent(include=settings.JUTANT_TRACE_CONTENT),
-        entity_types=pack.entity_types,
+        entity_types=deployment.entity_types,
         turn_mode=_turn_mode(settings.JUTANT_TURN_MODE),
-        tool_labels=pack.manifest.tool_labels,
+        tool_labels=deployment.tool_labels,
         actions=actions,
     )
     return Runtime(
         feedback=tracing.feedback_sink(settings),
-        pack=pack,
+        deployment=deployment,
         orchestrator=orchestrator,
         tool_client=tool_client,
         identity=DjangoIdentityProvider(
-            pack.manifest.roles,
+            deployment.roles(),
             LoginLimits(
                 per_user=settings.JUTANT_LOGIN_MAX_FAILURES,
                 per_ip=settings.JUTANT_LOGIN_MAX_FAILURES_PER_IP,

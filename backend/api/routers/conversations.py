@@ -208,7 +208,7 @@ async def ask(
         )
 
     return StreamingResponse(
-        sse.stream(request.app.state.queue, events, labels=runtime.pack.manifest.tool_labels),
+        sse.stream(request.app.state.queue, events, labels=runtime.deployment.tool_labels),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
@@ -293,12 +293,12 @@ async def _owned(runtime: Runtime, conversation_id: UUID, caller: Caller) -> Non
 def _check_feature(runtime: Runtime, caller: Caller, feature_id: str | None) -> None:
     registry = runtime.orchestrator.registry
     if feature_id is None:
-        if not registry.for_role(caller.role):
+        if not registry.for_caller(caller):
             raise HTTPException(status.HTTP_403_FORBIDDEN, "no features for your role")
         return
     try:
         feature = registry.get(feature_id)
     except KeyError:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "unknown feature") from None
-    if not feature.allows(caller.role):
+    if not feature.allows_caller(caller):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "your role may not use this feature")

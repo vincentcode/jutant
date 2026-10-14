@@ -1,4 +1,4 @@
-"""Builds the Ingestor with the deployment's real model, OCR engine and pack labels."""
+"""Builds the Ingestor with the deployment's real model, OCR engine and the packs' labels."""
 
 from django.conf import settings
 
@@ -8,11 +8,15 @@ from providers.llm import factory as llm_factory
 from providers.ocr.tesseract import TesseractOcr
 
 
+def pack_names() -> list[str]:
+    return [load_pack(path).manifest.name for path in settings.JUTANT_PACKS]
+
+
 def build_ingestor() -> Ingestor:
-    pack = load_pack(settings.JUTANT_PACK_PATH)
+    packs = [load_pack(path) for path in settings.JUTANT_PACKS]
     return Ingestor(
         model=llm_factory.build(settings),
-        labels=[c.label for c in pack.manifest.classifications],
+        labels=sorted({c.label for p in packs for c in p.manifest.classifications}),
         embed_dim=settings.JUTANT_EMBED_DIM,
         ocr=TesseractOcr(),
         document_prefix=settings.JUTANT_EMBED_DOCUMENT_PREFIX,

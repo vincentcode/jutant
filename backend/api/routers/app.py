@@ -14,6 +14,6 @@ router = APIRouter(prefix="/app", tags=["app"])
 async def app_info(runtime: Runtime = Depends(get_runtime)) -> AppOut:
     """Public: the sign-in page shows the name too. Nothing here is confidential."""
     return AppOut(
-        name=runtime.pack.manifest.display_name,
+        name=runtime.deployment.name,
         accent=settings.JUTANT_THEME_ACCENT or None,
     )

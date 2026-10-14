@@ -22,6 +22,7 @@ class Me(BaseModel):
     role: str
     display_name: str
     attributes: dict[str, str] = {}  # e.g. the branch, shown in Settings
+    packs: dict[str, str] = {}  # with several packs: the role in each (pack -> role)
 
 
 class HomeCardOut(BaseModel):

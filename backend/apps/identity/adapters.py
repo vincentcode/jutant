@@ -1,7 +1,7 @@
 """Implements core.ports.IdentityProvider: turns a logged-in user into a core Caller."""
 
 import math
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -10,7 +10,7 @@ from django.utils import timezone
 
 from apps.identity import directory, selectors, services
 from core.errors import PolicyDenied
-from core.types import Caller
+from core.types import Caller, PackRole
 
 STAFF_AUDIENCE = "staff"
 
@@ -28,8 +28,17 @@ class LoginLimits:
 
 
 class DjangoIdentityProvider:
-    def __init__(self, pack_roles: Iterable[str], limits: LoginLimits | None = None):
-        self.pack_roles = frozenset(pack_roles)
+    def __init__(
+        self,
+        pack_roles: Mapping[str, Iterable[str]] | Iterable[str],
+        limits: LoginLimits | None = None,
+    ):
+        """`pack_roles`: each loaded pack's roles (pack name -> roles); a plain list of roles
+        is one pack's, unnamed."""
+        if isinstance(pack_roles, Mapping):
+            self.roles = {name: frozenset(roles) for name, roles in pack_roles.items()}
+        else:
+            self.roles = {"": frozenset(pack_roles)}
         self.limits = limits or LoginLimits()
 
     async def login_wait(self, username: str, ip: str | None) -> int:
@@ -61,18 +70,29 @@ class DjangoIdentityProvider:
         return (failures[-limit] + self.limits.window - now).total_seconds()
 
     async def caller_for(self, user_id: str) -> Caller:
-        """`user_id` is the login name. Raises PolicyDenied for an unknown, inactive or
-        unassigned user, or a role the loaded pack does not define."""
+        """`user_id` is the login name. The caller has a role in each loaded pack the person
+        has one in: their own role in the pack that defines it, and their pack roles. Raises
+        PolicyDenied for an unknown or inactive user, or one with no role in any loaded pack."""
         staff = await sync_to_async(selectors.get_staff)(username=user_id)
         if staff is None or not staff.is_active or not staff.user.is_active:
             raise PolicyDenied("no active staff record")
-        if staff.role not in self.pack_roles:
-            raise PolicyDenied(f"role {staff.role!r} is not a role of this pack")
+        packs: dict[str, PackRole] = {}
+        home = next((p for p, roles in self.roles.items() if staff.role in roles), None)
+        if home is not None:
+            packs[home] = PackRole(staff.role, dict(staff.attributes or {}))
+        for row in staff.pack_roles.all():
+            if row.role in self.roles.get(row.pack, ()):
+                packs[row.pack] = PackRole(row.role, dict(row.attributes or {}))
+        if not packs:
+            raise PolicyDenied("no role in any pack of this deployment")
+        first = next(iter(packs.values()))
         return Caller(
             id=staff.staff_number,
-            role=staff.role,
+            role=first.role,
             audience=STAFF_AUDIENCE,
-            attributes=dict(staff.attributes or {}),
+            attributes=dict(first.attributes),
+            # One unnamed pack: the caller is the same everywhere, as before.
+            packs={} if list(packs) == [""] else packs,
         )
 
     async def authenticate(self, username: str, password: str) -> bool:

@@ -24,6 +24,7 @@ class Action:
     roles: tuple[str, ...] = ()  # roles that may propose it; empty = all
     expires_s: int = 600  # how long a draft waits to be confirmed
     icon: str = "send"  # a Lucide icon name for the card
+    pack: str = ""  # the pack that declares it: its tools see the caller's role there
 
     def allows(self, role: str) -> bool:
         return not self.roles or role in self.roles

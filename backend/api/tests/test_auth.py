@@ -20,6 +20,7 @@ async def test_login_sets_a_strict_http_only_cookie_and_returns_the_caller() -> 
             "role": "teller",
             "display_name": "Ama Mensah",
             "attributes": {"branch": "ACC-01"},
+            "packs": {"banking": "teller"},
         }
         cookie = response.headers["set-cookie"].lower()
         assert "httponly" in cookie and "samesite=strict" in cookie

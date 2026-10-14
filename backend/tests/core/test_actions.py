@@ -9,8 +9,10 @@ import pytest
 from core.actions.drafts import read_draft
 from core.actions.service import NOT_ANSWERED, REQUEST_ID
 from core.actions.types import Action
+from core.context import ContextStack
+from core.context.reader import Reading, certain
 from core.errors import ActionUnavailable
-from core.events import ActionProposed, Completed, TextDelta, ToolFinished
+from core.events import ActionProposed, Completed, FeatureSelected, TextDelta, ToolFinished
 from core.orchestrator.orchestrator import CHECK_THE_REQUEST
 from core.types import Caller, Citation, Feature, ModelReply, ToolCall, ToolResult
 from providers.llm.fake import FakeModel
@@ -193,3 +195,55 @@ def test_a_draft_is_bounded_and_needs_arguments_to_submit() -> None:
     draft = read_draft({**many, "summary": "y" * 1000})
     assert draft is not None and len(draft.fields) == 12 and len(draft.summary) == 300
     assert replace(draft, fields=()).submit == DRAFT["submit"]
+
+
+async def test_a_pattern_for_another_kind_of_help_starts_it_mid_subject() -> None:
+    """ "Book leave" while on the leave balance: the request feature's pattern says it is a new
+    subject, in code; the model is not asked "about the balance, or something else?"."""
+    balance = Feature(
+        "my_leave", "record_lookup", "My leave", "Leave balance.", "Answer.", ("leave.balance",), ()
+    )
+    request = replace(MY_LEAVE, id="leave_request", route_patterns=(r"(?i)\bbook\b.*\bleave\b",))
+    model = FakeModel(
+        replies=[
+            ModelReply(None, tool_calls=(ToolCall("1", "leave.balance", {}),)),
+            ModelReply("You have 13 days left."),
+            PROPOSE,
+        ]
+    )
+    cited = (Citation("record", "Leave balance", "E100"),)
+    rig = await make_rig(
+        model,
+        results={
+            "leave.balance": ToolResult("", ok=True, data={"left": "13"}, citations=cited),
+            "leave.propose": ToolResult("", ok=True, data=DRAFT),
+        },
+        specs=[
+            spec("leave.balance", OPEN),
+            spec("leave.propose", OPEN),
+            spec("leave.submit", OPEN),
+        ],
+        features=(balance, request),
+        default="my_leave",
+        actions=(LEAVE,),
+    )
+    conversation = uuid4()
+    await collect_events(rig.orchestrator.ask(employee(), conversation, "Leave left?", "my_leave"))
+    events = await collect_events(
+        rig.orchestrator.ask(employee(), conversation, "Please book leave from 9 to 13 Nov")
+    )
+    selected = [e.feature_id for e in events if isinstance(e, FeatureSelected)]
+    assert selected == ["leave_request"]
+    assert any(isinstance(e, ActionProposed) for e in events)
+
+
+def test_a_pattern_wins_over_the_kind_of_help_just_picked() -> None:
+    """Picked "my leave" (a subject opened, nothing asked yet), then typed "book leave": the
+    request, not the balance's first question. A message naming a record is left to its own
+    rules."""
+    stack = ContextStack()
+    stack.push("my_leave")
+    book = certain(stack, "book leave", {}, None, None, patterned="leave_request")
+    assert book == Reading("new", feature_id="leave_request", by="pattern")
+    own = certain(stack, "book leave", {}, None, None, patterned="my_leave")
+    assert own is not None and own.action == "continue"

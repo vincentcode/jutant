@@ -25,11 +25,16 @@ RRF_K = 60
 CANDIDATES_PER_LIST = 4  # each search fetches limit x this many before merging
 
 
-def searchable_chunks(classifications: list[str], doc_type: str | None = None) -> QuerySet[Chunk]:
+def searchable_chunks(
+    classifications: list[str], doc_type: str | None = None, pack: str = ""
+) -> QuerySet[Chunk]:
+    """Indexed chunks with one of the labels; with `pack`, its documents and the shared ones."""
     chunks = Chunk.objects.select_related("document").filter(
         document__status=Document.Status.INDEXED,
         document__classification__in=[c for c in classifications if c],
     )
+    if pack:
+        chunks = chunks.filter(document__pack__in=[pack, ""])
     return chunks.filter(document__doc_type=doc_type) if doc_type else chunks
 
 
@@ -40,13 +45,16 @@ def search(
     classifications: list[str],
     limit: int,
     doc_type: str | None = None,
+    pack: str = "",
 ) -> list[tuple[Chunk, float]]:
     """The best `limit` chunks with their fused scores, best first."""
     if not classifications or limit <= 0:
         return []
-    results = _search(query, query_embedding, searchable_chunks(classifications, doc_type), limit)
+    base = searchable_chunks(classifications, doc_type, pack)
+    results = _search(query, query_embedding, base, limit)
     if not results and doc_type:
-        results = _search(query, query_embedding, searchable_chunks(classifications), limit)
+        everything = searchable_chunks(classifications, None, pack)
+        results = _search(query, query_embedding, everything, limit)
     return results
 
 
@@ -84,13 +92,19 @@ def _search(
     return [(chunks[chunk_id], scores[chunk_id]) for chunk_id in best]
 
 
-def get_document(*, document_id: UUID, classifications: list[str]) -> Document | None:
-    """The document if it is indexed and the caller may read its classification, else None."""
-    return Document.objects.filter(
+def get_document(
+    *, document_id: UUID, classifications: list[str], pack: str = ""
+) -> Document | None:
+    """The document if it is indexed, the caller may read its classification, and it is the
+    pack's or shared; else None."""
+    found = Document.objects.filter(
         id=document_id,
         status=Document.Status.INDEXED,
         classification__in=[c for c in classifications if c],
-    ).first()
+    )
+    if pack:
+        found = found.filter(pack__in=[pack, ""])
+    return found.first()
 
 
 def find_by_checksum(*, checksum: str) -> Document | None:
@@ -103,13 +117,20 @@ def indexed_documents() -> list[Document]:
 
 
 def library(
-    *, classifications: list[str], search: str = "", doc_type: str = "", limit: int = 200
+    *,
+    classifications: list[str],
+    search: str = "",
+    doc_type: str = "",
+    limit: int = 200,
+    pack: str = "",
 ) -> list[Document]:
     """Indexed documents with one of the labels, newest first; optionally by title words or
     type. No text: this is for browsing."""
     rows = Document.objects.filter(
         status=Document.Status.INDEXED, classification__in=classifications
     ).defer("text")
+    if pack:
+        rows = rows.filter(pack__in=[pack, ""])
     if search:
         rows = rows.filter(title__icontains=search)
     if doc_type:

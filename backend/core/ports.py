@@ -97,10 +97,19 @@ class PlaybookStore(Protocol):
 
 
 class DocumentStore(Protocol):
+    """`pack`: only that pack's documents and those every pack shares; "" for all."""
+
     async def search(
-        self, query: str, classifications: list[str], limit: int, doc_type: str | None = None
+        self,
+        query: str,
+        classifications: list[str],
+        limit: int,
+        doc_type: str | None = None,
+        pack: str = "",
     ) -> list[DocumentHit]: ...
-    async def get_document(self, document_id: UUID, classifications: list[str]) -> DocumentText: ...
+    async def get_document(
+        self, document_id: UUID, classifications: list[str], pack: str = ""
+    ) -> DocumentText: ...
 
 
 class AuditSink(Protocol):

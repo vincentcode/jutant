@@ -71,6 +71,7 @@ def index_document(
     chunks: list[ChunkData],
     embeddings: list[list[float]],
     effective_date: date | None = None,
+    pack: str = "",
 ) -> tuple[Document, bool]:
     """Store a parsed document and its chunks in one transaction, ready for search.
 
@@ -87,6 +88,7 @@ def index_document(
     document.title = title
     document.doc_type = doc_type
     document.classification = classification
+    document.pack = pack
     document.checksum = checksum
     document.text = text
     document.effective_date = effective_date

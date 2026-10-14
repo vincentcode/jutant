@@ -35,7 +35,7 @@ async def list_features(
             group=GROUPS.get(f.template, ""),
             examples=list(f.suggestions[:2]),
         )
-        for f in orchestrator.registry.for_role(caller.role)
+        for f in orchestrator.registry.for_caller(caller)
         # Talking (a greeting, "what can you do?") is not a kind of help staff choose: it is
         # where the assistant goes when nothing else fits.
         if getattr(orchestrator.templates.get(f.template), "keeps_subject", True)

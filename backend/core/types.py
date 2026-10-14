@@ -1,7 +1,7 @@
 """Frozen dataclasses shared across the core. No behaviour beyond small helpers."""
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
@@ -10,11 +10,37 @@ Role = Literal["system", "user", "assistant", "tool"]
 
 
 @dataclass(frozen=True)
+class PackRole:
+    """What a person is in one pack: their role there, and that pack's attributes (a branch)."""
+
+    role: str
+    attributes: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class Caller:
+    """Who is asking. With several packs loaded, a person has a role in each pack they may use
+    (`packs`); `in_pack` gives the caller as one pack sees them, and that is what its tools and
+    rules receive. A caller without `packs` is the same in every pack (one pack loaded, tests).
+    """
+
     id: str  # staff id from the directory
     role: str  # one of the pack's roles
     audience: str  # "staff" in the first release
     attributes: dict[str, Any] = field(default_factory=dict)  # caller attributes from the pack
+    pack: str = ""  # the pack this caller acts in, once `in_pack` chose it
+    packs: dict[str, PackRole] = field(default_factory=dict)  # pack name -> role there
+
+    def in_pack(self, pack: str) -> "Caller | None":
+        """The caller as `pack` sees them: their role and attributes there. None if they have no
+        role in it. Unchanged when the caller has no roles by pack, or `pack` is the
+        deployment's own (""), as its conversation is."""
+        if not self.packs or not pack:
+            return self
+        found = self.packs.get(pack)
+        if found is None:
+            return None
+        return replace(self, role=found.role, attributes=dict(found.attributes), pack=pack)
 
 
 @dataclass(frozen=True)
@@ -170,9 +196,15 @@ class Feature:
     # What it must know before looking anything up, asked for in code when missing.
     details: tuple[Detail, ...] = ()
     needs: Needs | None = None
+    pack: str = ""  # the pack it comes from; "" for the deployment's own (its conversation)
 
     def allows(self, role: str) -> bool:
         return not self.roles or role in self.roles
+
+    def allows_caller(self, caller: Caller) -> bool:
+        """Whether `caller` may use it: they have a role in its pack that it allows."""
+        found = caller.in_pack(self.pack)
+        return found is not None and self.allows(found.role)
 
 
 @dataclass(frozen=True)

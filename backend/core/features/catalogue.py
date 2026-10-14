@@ -11,11 +11,16 @@ prompt adds its examples.
 
 from collections.abc import Iterable, Mapping
 
-from core.types import Feature
+from core.types import Caller, Feature
 
 READ_ONLY = (
     "You only read records and documents: you cannot change anything or carry out an action "
     "for staff. For a change, say which kind of help shows its form, approvals or steps."
+)
+# With requests to send (`core.actions`): prepared, never sent, by the assistant.
+PREPARES = (
+    "You cannot change anything yourself. Some kinds of help prepare a request (such as asking "
+    "for leave): it is shown to staff to check, and sent only when they press Send."
 )
 # How staff use the assistant: the web client's own controls, by the names it shows.
 USING = (
@@ -31,27 +36,29 @@ USING = (
 
 def catalogue(
     features: Iterable[Feature],
-    role: str,
+    caller: Caller,
     tool_labels: Mapping[str, str],
     leave_out: Iterable[str] = (),
+    prepares: bool = False,
 ) -> str:
-    """The facts for a caller with `role`. `leave_out`: features that are not kinds of help
-    (the conversation itself)."""
+    """The facts for `caller`. `leave_out`: features that are not kinds of help (the
+    conversation itself). A pack the caller has no role in is not mentioned at all. `prepares`:
+    some kinds of help prepare requests to send."""
     skipped = set(leave_out)
-    kinds = [f for f in features if f.id not in skipped]
+    kinds = [f for f in features if f.id not in skipped and caller.in_pack(f.pack) is not None]
     lines = ["The kinds of help you give:"]
-    for feature in (f for f in kinds if f.allows(role)):
+    for feature in (f for f in kinds if f.allows_caller(caller)):
         looks = [tool_labels[t] for t in feature.tools if t in tool_labels]
         line = f"- {feature.title}: {feature.description}"
         lines.append(f"{line} It looks at {', '.join(looks)}." if looks else line)
-    others = [f for f in kinds if not f.allows(role)]
+    others = [f for f in kinds if not f.allows_caller(caller)]
     if others:
         lines.append(
             "Not for this staff member's role: "
             + "; ".join(f"{f.title} (for {_roles(f.roles)})" for f in others)
             + "."
         )
-    lines += [READ_ONLY, USING]
+    lines += [PREPARES if prepares else READ_ONLY, USING]
     return "\n".join(lines)
 
 

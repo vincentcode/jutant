@@ -92,14 +92,11 @@ services:
       <<: *mcp-health
       test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 8106), 2)"]
 
-  # The HR pack's server (packs/hr), for a deployment run with JUTANT_PACK_PATH=packs/hr. Start
-  # it with the `hr` profile:
-  #   docker compose -f infra/docker-compose.yml --profile hr up -d
-  # It answers from the dummy HR system until JUTANT_HR_ADAPTERS=real points it at HR systems.
+  # The HR pack's server (packs/hr). It answers from the dummy HR system until
+  # JUTANT_HR_ADAPTERS=real points it at HR systems.
   mcp-hr:
     <<: *python
     command: python -m packs.hr.mcp_servers.hr.server
-    profiles: [hr]
     healthcheck:
       <<: *mcp-health
       test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 8107), 2)"]
@@ -107,7 +104,7 @@ services:
   # A stand-in for the HR systems, serving the dummy HR system over HTTP, to run the real HR
   # clients (JUTANT_HR_ADAPTERS=real) before the HR systems are known. Point
   # JUTANT_HR_RECORDS_URL, JUTANT_HR_LEAVE_URL and JUTANT_HR_HELPDESK_URL at
-  # http://mock-hr:8191.
+  # http://mock-hr:8191. Start it with the `hr` profile.
   mock-hr:
     <<: *python
     command: python -m packs.hr.mock_hr
@@ -148,7 +145,7 @@ services:
       mcp-accounts: {condition: service_healthy}
       mcp-lending: {condition: service_healthy}
       mcp-cards: {condition: service_healthy}
-      mcp-hr: {condition: service_healthy, required: false}
+      mcp-hr: {condition: service_healthy}
       ollama: {condition: service_started, required: false}
     healthcheck:
       test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 8000), 2)"]

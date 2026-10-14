@@ -10,7 +10,12 @@ from apps.identity.models import LoginAttempt, Staff
 
 def get_staff(*, username: str) -> Staff | None:
     """The Staff row for a login name, with its user, or None."""
-    return Staff.objects.select_related("user").filter(user__username=username).first()
+    return (
+        Staff.objects.select_related("user")
+        .prefetch_related("pack_roles")
+        .filter(user__username=username)
+        .first()
+    )
 
 
 def user_with_password(*, username: str, password: str) -> AbstractBaseUser | None:

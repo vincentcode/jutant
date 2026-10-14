@@ -131,6 +131,7 @@ class Orchestrator:
         turn_mode: TurnMode = "route",
         tool_labels: Mapping[str, str] | None = None,
         actions: ActionService | None = None,
+        system_prompts: Mapping[str, str] | None = None,
     ):
         self.model = model
         self.tools = tools
@@ -143,6 +144,9 @@ class Orchestrator:
         self.max_steps = max_steps
         self.history_limit = history_limit
         self.system_prompt = system_prompt
+        # With several packs: each pack's own, for its features' turns (`system_prompt` for the
+        # deployment's own conversation).
+        self.system_prompts = dict(system_prompts or {})
         self.extraction_schemas = dict(extraction_schemas or {})
         self.templates = templates
         self.tracer = tracer
@@ -250,7 +254,21 @@ class Orchestrator:
         waiting = await self.runner.current(conversation_id) if top and top.procedure else None
         step = waiting[1] if waiting else None
         gives = top is not None and top.awaiting and self._gives(top, text, mentioned)
-        reading = certain(stack, text, mentioned, reply_as, feature_id, subject_id, step, gives)
+        # A message naming nothing that another kind of help's pattern says is for it ("book
+        # leave" while on the leave balance) is a new subject, not more of this one: asked
+        # "about the leave balance, or something else?" a small model says the same.
+        patterned = self.router.by_pattern(caller, text)
+        reading = certain(
+            stack,
+            text,
+            mentioned,
+            reply_as,
+            feature_id,
+            subject_id,
+            step,
+            gives,
+            patterned.id if patterned is not None else None,
+        )
         if reading is None and not mentioned and stack.top is not None and not stack.top.procedure:
             reading = await self._continues(text, stack, turn, timer)
         if reading is None:
@@ -408,7 +426,7 @@ class Orchestrator:
         # In agent mode a new subject's feature is the conversation's to choose: the reading
         # only says it is new. (In hybrid mode the reading still names one, from the context.)
         new_only = self._agent() is not None
-        features = [] if new_only else self.registry.for_role(caller.role)
+        features = [] if new_only else self.registry.for_caller(caller)
         if stack.procedure_frame() is not None:  # one procedure at a time
             features = [f for f in features if f.template != PROCEDURE_TEMPLATE]
         with turn.span("read turn", "chain") as span:
@@ -460,7 +478,7 @@ class Orchestrator:
         ]
         choices += [
             Choice("feature", f.title, feature_id=f.id)
-            for f in self.registry.for_role(caller.role)
+            for f in self.registry.for_caller(caller)
             if not _passing(self.templates.get(f.template))
             and not (procedure is not None and f.template == PROCEDURE_TEMPLATE)
         ]
@@ -613,7 +631,7 @@ class Orchestrator:
                 search_text=search,
                 entities=entities,
                 details=details,
-                messages=build_messages(self.system_prompt, feature, history, text),
+                messages=build_messages(self._system_prompt(feature), feature, history, text),
                 model=TimedModel(TracedModel(self.model, turn), timer),
                 gateway=self.gateway,
                 playbooks=self.playbooks,
@@ -626,7 +644,7 @@ class Orchestrator:
                 entity_types=self.entity_types,
                 offers=tuple(
                     (f.id, f.title, f.description)
-                    for f in self.registry.for_role(caller.role)
+                    for f in self.registry.for_caller(caller)
                     if not _passing(self.templates.get(f.template))
                     # one procedure at a time: another is not offered while one is open
                     and not (open_procedure and f.template == PROCEDURE_TEMPLATE)
@@ -635,7 +653,11 @@ class Orchestrator:
                 proposals=self._proposals(),
                 subjects_open=any(f.id != frame.id for f in stack.frames),
                 catalogue=catalogue(
-                    self.registry, caller.role, self.tool_labels, _passing_ids(self)
+                    self.registry,
+                    caller,
+                    self.tool_labels,
+                    _passing_ids(self),
+                    prepares=bool(self._proposals()),
                 )
                 if _passing(template)
                 else "",
@@ -938,7 +960,7 @@ class Orchestrator:
     async def _audit_route(
         self, caller: Caller, conversation_id: UUID, feature: Feature, by: str, turn: Trace
     ) -> None:
-        if not feature.allows(caller.role):
+        if not feature.allows_caller(caller):
             raise PolicyDenied(f"role {caller.role} may not use {feature.id}")
         await self.audit.record(
             caller,
@@ -1026,7 +1048,7 @@ class Orchestrator:
                 detail["preferred"] = prefer
             if route.score is not None:
                 detail["score"] = route.score
-        if not feature.allows(caller.role):
+        if not feature.allows_caller(caller):
             raise PolicyDenied(f"role {caller.role} may not use {feature.id}")
         await self.audit.record(caller, "feature_routed", {**detail, "feature_id": feature.id})
         turn.set(feature=feature.id, routed_by=detail["chosen_by"])
@@ -1138,6 +1160,9 @@ class Orchestrator:
         trace.set(output=trace.text(text), citations=len(citations), **_timing(timer))
         yield Completed(Answer(text, feature_id, citations, tuple(calls)))
 
+    def _system_prompt(self, feature: Feature) -> str:
+        return self.system_prompts.get(feature.pack, self.system_prompt)
+
     def _proposals(self) -> frozenset[str]:
         if self.actions is None:
             return frozenset()
@@ -1157,7 +1182,8 @@ class Orchestrator:
         call = next((c for c in reversed(calls) if c.id == result.call_id), None)
         action = self.actions.proposed_by(call.name) if call is not None else None
         draft = read_draft(result.data)
-        if action is None or draft is None or not action.allows(caller.role):
+        acting = caller.in_pack(action.pack) if action is not None else None
+        if action is None or draft is None or acting is None or not action.allows(acting.role):
             return None
         return ActionProposed(await self.actions.propose(caller, conversation_id, action, draft))
 

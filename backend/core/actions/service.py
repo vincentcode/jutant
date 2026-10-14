@@ -71,13 +71,14 @@ class ActionService:
     async def confirm(self, caller: Caller, proposal_id: UUID) -> Proposal:
         proposal = await self.store.claim(proposal_id, caller.id, self.now())
         action = self.actions.get(proposal.action_id)
-        if action is None or not action.allows(caller.role):
+        acting = caller.in_pack(action.pack) if action is not None else None
+        if action is None or acting is None or not action.allows(acting.role):
             done = await self.store.finish(proposal.id, "failed", outcome=FAILED["denied"])
             await self.audit.record(caller, "action_failed", {**_detail(done), "error": "denied"})
             return done
         arguments = {**proposal.draft.submit, REQUEST_ID: str(proposal.id)}
         result = await self.tools.call(
-            caller, ToolCall(f"action-{proposal.id}", action.perform, arguments)
+            acting, ToolCall(f"action-{proposal.id}", action.perform, arguments)
         )
         if result.ok:
             reference, status = read_outcome(result.data)

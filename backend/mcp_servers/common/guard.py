@@ -31,7 +31,7 @@ from mcp.server.mcpserver import Context, MCPServer
 
 from core.errors import PolicyDenied
 from core.observability import NOOP, Trace, TraceContent, Tracer
-from core.policy.engine import PolicyEngine
+from core.policy.engine import PackPolicies, PolicyEngine
 from core.policy.rules import Decision
 from core.tools import envelope
 from core.types import Citation
@@ -60,7 +60,7 @@ class GuardedServer:
     def __init__(
         self,
         name: str,
-        engine: PolicyEngine,
+        engine: PolicyEngine | PackPolicies,
         secret: str,
         tracer: Tracer = NOOP,
         trace_content: TraceContent | None = None,

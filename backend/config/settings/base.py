@@ -86,7 +86,16 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # --- Jutant ------------------------------------------------------------------
 
-JUTANT_PACK_PATH = BASE_DIR / env("JUTANT_PACK_PATH", "packs/banking")
+# The packs this deployment runs as one assistant, comma-separated, the first's conversation
+# kept. JUTANT_PACK_PATH (one pack) is still read when JUTANT_PACKS is not set.
+JUTANT_PACKS = [
+    BASE_DIR / p.strip()
+    for p in env("JUTANT_PACKS", env("JUTANT_PACK_PATH", "packs/banking")).split(",")
+    if p.strip()
+]
+JUTANT_PACK_PATH = JUTANT_PACKS[0]
+# The assistant's name, as staff see it; empty: the first pack's own name.
+JUTANT_ASSISTANT_NAME = env("JUTANT_ASSISTANT_NAME", "")
 JUTANT_CALLER_SECRET = env("JUTANT_CALLER_SECRET", "change-me")
 JUTANT_SESSION_SECRET = env("JUTANT_SESSION_SECRET", "change-me-too")
 JUTANT_SESSION_TTL_MIN = int(env("JUTANT_SESSION_TTL_MIN", "480"))

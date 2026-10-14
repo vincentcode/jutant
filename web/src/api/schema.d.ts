@@ -557,6 +557,13 @@ export interface components {
             attributes: {
                 [key: string]: string;
             };
+            /**
+             * Packs
+             * @default {}
+             */
+            packs: {
+                [key: string]: string;
+            };
         };
         /** MessageOut */
         MessageOut: {
