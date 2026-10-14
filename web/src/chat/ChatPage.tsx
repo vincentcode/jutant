@@ -213,7 +213,7 @@ export function ChatPage() {
   )
 
   return (
-    <div className="flex h-dvh">
+    <div className="flex h-dvh overflow-hidden">
       <a href="#question" className="skip-link">
         Skip to the question box
       </a>
