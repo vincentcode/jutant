@@ -100,7 +100,8 @@ class EntityType:
 @dataclass(frozen=True)
 class Detail:
     """Something a feature must know before it looks anything up (`core.features.needs`).
-    Found by an entity type's pattern, picked from listed values, or a date: exactly one."""
+    Found by an entity type's pattern, picked from listed values, a date or a period: exactly
+    one."""
 
     name: str
     label: str  # what it is, in staff's words, for asking: "the customer's phone number"
@@ -112,6 +113,9 @@ class Detail:
     date: bool = False  # a date, read in code
     ask: str = ""  # the question asking for it alone (a choice: "Which ... was it?")
     title: str = ""  # its name on a button ("Phone number"); else from its label
+    # A period, read in code: "10 to 14 November", or one day. Kept as "start/end" (ISO).
+    period: bool = False
+    nearest: bool = False  # a date or period given without a year is the one nearest today
 
 
 @dataclass(frozen=True)

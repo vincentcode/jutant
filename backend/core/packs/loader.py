@@ -141,6 +141,8 @@ def _detail(name: str, d: DetailDef) -> Detail:
         d.date,
         d.ask,
         d.title,
+        d.period,
+        d.nearest,
     )
 
 

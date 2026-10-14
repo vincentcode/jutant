@@ -159,5 +159,6 @@ JUTANT_MCP_URLS = {
     "accounts": env("JUTANT_MCP_ACCOUNTS_URL", "http://localhost:8104/mcp"),
     "lending": env("JUTANT_MCP_LENDING_URL", "http://localhost:8105/mcp"),
     "cards": env("JUTANT_MCP_CARDS_URL", "http://localhost:8106/mcp"),
+    "hr": env("JUTANT_MCP_HR_URL", "http://localhost:8107/mcp"),
 }
 JUTANT_BANKING_ADAPTERS = env("JUTANT_BANKING_ADAPTERS", "fake")

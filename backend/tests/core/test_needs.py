@@ -11,7 +11,7 @@ from pydantic import ValidationError
 from core.context.stack import ContextStack
 from core.evals.turns import render, summarise
 from core.events import Clarify, Completed, TextDelta
-from core.features.needs import ASKED, WAY, given, missing, read_date, update
+from core.features.needs import ASKED, WAY, given, missing, read_date, read_period, update
 from core.packs.contract import _needs_problems
 from core.packs.manifest import DetailDef, FeatureDef
 from core.types import ArgumentSource, Detail, EntityType, ModelReply, Needs, Prefetch
@@ -265,3 +265,30 @@ def test_asking_for_a_value_is_not_counted_as_asking_what_a_message_is() -> None
     )
     assert (report.turns, report.asked_total, report.asked["detail"]) == (2, 0, 1)
     assert "values asked for    1" in render(report)
+
+
+@pytest.mark.parametrize(
+    ("text", "period"),
+    [
+        ("10 to 14 November", "2026-11-10/2026-11-14"),
+        ("I'd like 10-14 Nov off", "2026-11-10/2026-11-14"),
+        ("Nov 10-14", "2026-11-10/2026-11-14"),
+        ("from 10 Nov to 2 Dec", "2026-11-10/2026-12-02"),
+        ("just 12 Nov", "2026-11-12/2026-11-12"),
+        ("28 Dec to 3 Jan", "2026-12-28/2027-01-03"),
+        ("10/11/2026 - 14/11/2026", "2026-11-10/2026-11-14"),
+        ("5 to 9 Oct", "2026-10-05/2026-10-09"),  # last week: sick leave, recorded after
+        ("20 Jan", "2027-01-20/2027-01-20"),  # nearest: next January, not last
+        ("14 Nov to 10 Nov", None),  # an end before the start is refused, never moved a year on
+        ("annual leave", None),
+    ],
+)
+def test_a_period_is_read_in_code(text: str, period: str | None) -> None:
+    assert read_period(text, date(2026, 10, 13), nearest=True) == period
+
+
+def test_a_date_without_a_year_is_the_latest_past_one_unless_nearest() -> None:
+    today = date(2026, 10, 13)
+    assert read_date("20 Oct", today) == "2025-10-20"  # a transaction: it happened before
+    assert read_date("20 Oct", today, nearest=True) == "2026-10-20"
+    assert read_date("tomorrow", today) == "2026-10-14"

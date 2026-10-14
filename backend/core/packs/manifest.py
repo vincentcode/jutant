@@ -57,20 +57,26 @@ class ArgumentDef(BaseModel):
 
 class DetailDef(BaseModel):
     """Something a feature must know before it looks anything up: an entity's id, one of the
-    values listed in `choose` (value: title), or a date."""
+    values listed in `choose` (value: title), a date, or a period (two dates: leave from 10 to
+    14 November). `nearest`: a date given without a year is the one nearest today (leave, a
+    week ago or in two months), not the latest one before it (a transaction)."""
 
     label: str  # "the customer's phone number": used to ask for it
     entity: str | None = None
     choose: dict[str, str] = {}
     words: dict[str, list[str]] = {}  # value -> other words that name it in a message
     date: bool = False
+    period: bool = False
+    nearest: bool = False
     ask: str = ""  # the question asking for it alone
     title: str = ""  # its name on a button: "Phone number"
 
     @model_validator(mode="after")
     def _exactly_one(self) -> "DetailDef":
-        if sum(bool(g) for g in (self.entity, self.choose, self.date)) != 1:
-            raise ValueError("set exactly one of entity, choose or date")
+        if sum(bool(g) for g in (self.entity, self.choose, self.date, self.period)) != 1:
+            raise ValueError("set exactly one of entity, choose, date or period")
+        if self.nearest and not (self.date or self.period):
+            raise ValueError("nearest applies to a date or a period")
         if unknown := sorted(set(self.words) - set(self.choose)):
             raise ValueError(f"words name values not in choose: {', '.join(unknown)}")
         return self

@@ -216,7 +216,9 @@ def _value(detail: Detail, text: str, entities: Mapping[str, str], today: date) 
     if detail.choose:
         return _chosen(detail, text)
     if detail.date:
-        return read_date(text, today)
+        return read_date(text, today, detail.nearest)
+    if detail.period:
+        return read_period(text, today, detail.nearest)
     return None
 
 
@@ -236,15 +238,18 @@ def _names(text: str, words: str) -> bool:
     return bool(re.search(rf"(?i)(?<!\w){re.escape(words)}(?!\w)", text))
 
 
-def read_date(text: str, today: date) -> str | None:
+def read_date(text: str, today: date, nearest: bool = False) -> str | None:
     """The date `text` gives, as YYYY-MM-DD: 2026-10-11, 11/10/2026 (day first), 11 October,
-    October 11, today, yesterday. A day and month with no year is the latest one not after
-    today. None if it gives none, or one that is not a date."""
+    October 11, today, yesterday, tomorrow. A day and month with no year is the latest one not
+    after today, or with `nearest` the one nearest today. None if it gives none, or one that is
+    not a date."""
     lowered = text.lower()
     if re.search(r"\btoday\b", lowered):
         return today.isoformat()
     if re.search(r"\byesterday\b", lowered):
         return (today - timedelta(days=1)).isoformat()
+    if re.search(r"\btomorrow\b", lowered):
+        return (today + timedelta(days=1)).isoformat()
     if found := re.search(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b", lowered):
         year, month, day = (int(g) for g in found.groups())
         return _iso(year, month, day)
@@ -258,8 +263,74 @@ def read_date(text: str, today: date) -> str | None:
         day, month, year = int(found[2]), MONTHS[found[1]], found[3]
     else:
         return None
+    return _in_year(day, month, year, today, nearest)
+
+
+# Between the two ends of a period: "10-14", "10 to 14", "10 until 14".
+_TO = r"\s*(?:-|–|\bto\b|\buntil\b|\btill\b|\bthrough\b)\s*"
+_WORD_TO = r"\s+(?:to|until|till|through|–|-)\s+"  # between two whole dates
+
+
+def read_period(text: str, today: date, nearest: bool = False) -> str | None:
+    """The period `text` gives, as "YYYY-MM-DD/YYYY-MM-DD": "10 to 14 November", "10-14 Nov",
+    "Nov 10-14", "from 10 Nov to 2 Dec", two dates in any form `read_date` reads, or one date
+    (a single day). Without a year, the start is placed as `read_date` places it, and the end
+    on or after it: in a later month of the next year (28 Dec to 3 Jan), never the same month a
+    year on. None if it gives no date, or an end before the start."""
+    lowered = text.lower()
+    one_month = rf"\b{_DAY}{_TO}{_DAY}\s+(?:of\s+)?({_MONTH})\b\.?(?:,?\s+(\d{{4}}))?"
+    if found := re.search(one_month, lowered):
+        month = MONTHS[found[3]]
+        start = _in_year(int(found[1]), month, found[4], today, nearest)
+        return _period(start, _on_or_after(start, int(found[2]), month))
+    month_first = rf"\b({_MONTH})\.?\s+{_DAY}{_TO}{_DAY}\b(?:,?\s+(\d{{4}}))?"
+    if found := re.search(month_first, lowered):
+        month = MONTHS[found[1]]
+        start = _in_year(int(found[2]), month, found[4], today, nearest)
+        return _period(start, _on_or_after(start, int(found[3]), month))
+    halves = re.split(_WORD_TO, lowered, maxsplit=1)
+    start = read_date(halves[0], today, nearest)
+    if start is None:
+        return None
+    if len(halves) == 1:
+        return _period(start, start)
+    if re.search(r"\d{4}", halves[1]):
+        end = read_date(halves[1], date.fromisoformat(start))
+    else:  # read in the start's year, then placed after it
+        end = _rolled(read_date(halves[1], date(int(start[:4]), 12, 31)), start)
+    return _period(start, end or start)
+
+
+def _period(start: str | None, end: str | None) -> str | None:
+    if start is None or end is None or end < start:
+        return None
+    return f"{start}/{end}"
+
+
+def _on_or_after(start: str | None, day: int, month: int) -> str | None:
+    """The day of `month` on or after `start`: the end of a period given with one month."""
+    if start is None:
+        return None
+    return _rolled(_iso(int(start[:4]), month, day), start)
+
+
+def _rolled(end: str | None, start: str) -> str | None:
+    """An end read in the start's year that falls before it: the next year's, if its month comes
+    earlier in the year (28 Dec to 3 Jan); in the same month (14 to 10 Nov) it stays before the
+    start, and the period is refused."""
+    if end is None or end >= start or int(end[5:7]) >= int(start[5:7]):
+        return end
+    return _iso(int(end[:4]) + 1, int(end[5:7]), int(end[8:10]))
+
+
+def _in_year(day: int, month: int, year: str | None, today: date, nearest: bool) -> str | None:
+    """A day and month in `year`; without one, the latest not after `today`, or with
+    `nearest` the one nearest today (last year's, this year's or next year's)."""
     if year is not None:
         return _iso(int(year), month, day)
+    if nearest:
+        options = [d for y in (-1, 0, 1) if (d := _iso(today.year + y, month, day)) is not None]
+        return min(options, key=lambda d: abs(date.fromisoformat(d) - today), default=None)
     this_year = _iso(today.year, month, day)
     if this_year is not None and this_year <= today.isoformat():
         return this_year
