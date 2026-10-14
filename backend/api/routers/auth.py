@@ -83,4 +83,5 @@ async def _me(runtime: Runtime, username: str, caller: Caller) -> Me:
         role=caller.role,
         display_name=await runtime.identity.display_name(username),
         attributes={k: str(v) for k, v in caller.attributes.items()},
+        packs={name: found.role for name, found in caller.packs.items()},
     )

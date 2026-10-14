@@ -27,20 +27,69 @@ class RouteDef(BaseModel):
 
 
 class ArgumentDef(BaseModel):
-    """One argument of a prefetched call: `{question: true}`, `{match: '<regex>'}` or
-    `{value: ...}`."""
+    """One argument of a prefetched call: `{question: true}`, `{match: '<regex>'}`,
+    `{value: ...}`, `{entity: <type>}`, `{choose: {...}}` or `{detail: <name>}`; with
+    `optional: true`, left out when it has no value."""
 
     question: bool = False
     match: str | None = None
     value: Any = None
     entity: str | None = None  # an entity type the pack declares: the conversation's current one
+    # value -> what it means: the model picks the one the question is about, or none
+    choose: dict[str, str] = {}
+    detail: str | None = None  # one of the feature's details, once staff gave it
+    optional: bool = False
 
     @model_validator(mode="after")
     def _exactly_one(self) -> "ArgumentDef":
-        given = (self.question, self.match is not None, self.value is not None, self.entity)
+        given = (
+            self.question,
+            self.match is not None,
+            self.value is not None,
+            self.entity,
+            self.choose,
+            self.detail,
+        )
         if sum(bool(g) for g in given) != 1:
-            raise ValueError("set exactly one of question, match, value or entity")
+            raise ValueError("set exactly one of question, match, value, entity, choose or detail")
         return self
+
+
+class DetailDef(BaseModel):
+    """Something a feature must know before it looks anything up: an entity's id, one of the
+    values listed in `choose` (value: title), a date, or a period (two dates: leave from 10 to
+    14 November). `nearest`: a date given without a year is the one nearest today (leave, a
+    week ago or in two months), not the latest one before it (a transaction)."""
+
+    label: str  # "the customer's phone number": used to ask for it
+    entity: str | None = None
+    choose: dict[str, str] = {}
+    words: dict[str, list[str]] = {}  # value -> other words that name it in a message
+    date: bool = False
+    period: bool = False
+    nearest: bool = False
+    ask: str = ""  # the question asking for it alone
+    title: str = ""  # its name on a button: "Phone number"
+
+    @model_validator(mode="after")
+    def _exactly_one(self) -> "DetailDef":
+        if sum(bool(g) for g in (self.entity, self.choose, self.date, self.period)) != 1:
+            raise ValueError("set exactly one of entity, choose, date or period")
+        if self.nearest and not (self.date or self.period):
+            raise ValueError("nearest applies to a date or a period")
+        if unknown := sorted(set(self.words) - set(self.choose)):
+            raise ValueError(f"words name values not in choose: {', '.join(unknown)}")
+        return self
+
+
+class NeedsDef(BaseModel):
+    """Which details a feature needs: `first`, asked one at a time; then any one complete set of
+    `one_of`, or with `by` (a detail asked first), of `one_of_by` for its value."""
+
+    first: list[str] = []
+    one_of: list[list[str]] = []
+    by: str | None = None
+    one_of_by: dict[str, list[list[str]]] = {}
 
 
 class EntityDef(BaseModel):
@@ -54,6 +103,9 @@ class EntityDef(BaseModel):
 class PrefetchDef(BaseModel):
     tool: str
     arguments: dict[str, ArgumentDef]
+    # "who may sign on the account": of the calls with a `when`, the model picks the one a
+    # question is about, and only that one is made.
+    when: str = ""
 
 
 class FeatureDef(BaseModel):
@@ -73,6 +125,9 @@ class FeatureDef(BaseModel):
     ask_for: str = ""
     # Where follow-ups to this feature's answers go, if not to itself.
     follow_ups: str = ""
+    # What it must know before looking anything up, by name; asked for in code when missing.
+    details: dict[str, DetailDef] = {}
+    needs: NeedsDef | None = None
 
 
 class Classification(BaseModel):
@@ -101,16 +156,20 @@ class HomeCard(BaseModel):
     label: str = ""  # a short tag under it, e.g. "Payments"
 
 
-class QuickAction(BaseModel):
-    """A chip in the client's question box that picks a feature."""
-
-    label: str  # "Transaction"
-    feature: str
-
-
 class HomeDef(BaseModel):
     cards: list[HomeCard] = []
-    quick_actions: list[QuickAction] = []
+
+
+class ActionDef(BaseModel):
+    """Something done in a client system once the person confirms it (`core.actions`)."""
+
+    id: str
+    title: str
+    propose: str  # the tool a feature lists: checks the request, returns a draft
+    perform: str  # the tool that does it: no feature may list it
+    roles: list[str] = []
+    expires_s: int = 600
+    icon: str = "send"
 
 
 class PackManifest(BaseModel):
@@ -133,3 +192,4 @@ class PackManifest(BaseModel):
     # follow-up's lookups use it ("why did it fail?" after TX-0002).
     entities: dict[str, EntityDef] = {}
     policy: str  # dotted path to a module exposing RULES
+    actions: list[ActionDef] = []

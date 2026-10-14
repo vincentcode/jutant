@@ -32,7 +32,9 @@ def servers_for(pack: Pack) -> dict[str, GuardedServer]:
     engine = PolicyEngine(pack.rules, pack.field_rules)
     build_servers = importlib.import_module(f"packs.{pack.path.name}.mcp_servers").build_servers
     return {
-        "documents": documents_server(None, engine, "", pack.readable_classifications),
+        "documents": documents_server(
+            None, engine, "", lambda caller: pack.readable_classifications(caller.role)
+        ),
         **build_servers(engine, "", "fake"),
     }
 
@@ -54,7 +56,7 @@ async def test_pack_passes_the_contract(pack_dir: Path) -> None:
 def test_banking_pack_loads_its_content() -> None:
     pack = load_pack(PACKS_DIR / "banking")
     assert pack.manifest.name == "banking"
-    assert len(pack.features) == 9  # eight kinds of help, and conversation
+    assert len(pack.features) == 12  # eleven kinds of help, and conversation
     assert {p.id for p in pack.playbooks} == {"blocked_card", "dormant_account", "failed_transfer"}
     assert pack.system_prompt.startswith("You are the Bank Staff Assistant.")
     assert all(f.prompt for f in pack.features)

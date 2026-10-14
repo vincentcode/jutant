@@ -31,3 +31,13 @@ class PackContractError(JutantError):
 
 class ModelUnavailable(JutantError):
     """The model provider could not be reached or timed out."""
+
+
+class ActionUnavailable(JutantError):
+    """A proposed action cannot be confirmed or cancelled: there is no such proposal for the
+    caller (`not_found`), or it is no longer waiting (`expired`, `sending`, `sent`, `failed`,
+    `cancelled`)."""
+
+    def __init__(self, reason: str):
+        self.reason = reason
+        super().__init__(reason)

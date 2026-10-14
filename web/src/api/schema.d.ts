@@ -115,26 +115,6 @@ export interface paths {
         patch: operations["rename_api_conversations__conversation_id__patch"];
         trace?: never;
     };
-    "/api/conversations/{conversation_id}/subjects": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Subjects
-         * @description The subjects open in the conversation, current first, for staff to return to.
-         */
-        get: operations["subjects_api_conversations__conversation_id__subjects_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/conversations/{conversation_id}/procedure": {
         parameters: {
             query?: never;
@@ -208,6 +188,64 @@ export interface paths {
          * @description Ask a question; the answer streams back as server-sent events.
          */
         post: operations["ask_api_conversations__conversation_id__ask_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/conversations/{conversation_id}/actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Proposals
+         * @description The requests proposed in the conversation, oldest first, each as its card now stands.
+         */
+        get: operations["proposals_api_conversations__conversation_id__actions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/conversations/{conversation_id}/actions/{proposal_id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm
+         * @description Send a proposed request, exactly as its card showed it. Only the person it was proposed
+         *     to may send it, once, before it expires; the model takes no part.
+         */
+        post: operations["confirm_api_conversations__conversation_id__actions__proposal_id__confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/conversations/{conversation_id}/actions/{proposal_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel */
+        post: operations["cancel_api_conversations__conversation_id__actions__proposal_id__cancel_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -327,9 +365,11 @@ export interface components {
             /** Preferred Feature Id */
             preferred_feature_id?: string | null;
             /** Reply As */
-            reply_as?: ("answer" | "question" | "resume" | "stop" | "return" | "continue") | null;
+            reply_as?: ("answer" | "question" | "resume" | "stop" | "return" | "continue" | "start" | "detail") | null;
             /** Subject Id */
             subject_id?: number | null;
+            /** Picked */
+            picked?: number | null;
             /** Upload Id */
             upload_id?: string | null;
         };
@@ -440,6 +480,13 @@ export interface components {
              */
             comment: string;
         };
+        /** FieldOut */
+        FieldOut: {
+            /** Label */
+            label: string;
+            /** Value */
+            value: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -477,7 +524,7 @@ export interface components {
         };
         /**
          * HomeOut
-         * @description The home screen for the caller: only cards and actions for features their role may use.
+         * @description The home screen for the caller: only cards for features their role may use.
          */
         HomeOut: {
             /**
@@ -485,11 +532,6 @@ export interface components {
              * @default []
              */
             cards: components["schemas"]["HomeCardOut"][];
-            /**
-             * Quick Actions
-             * @default []
-             */
-            quick_actions: components["schemas"]["QuickActionOut"][];
         };
         /** LoginRequest */
         LoginRequest: {
@@ -513,6 +555,13 @@ export interface components {
              * @default {}
              */
             attributes: {
+                [key: string]: string;
+            };
+            /**
+             * Packs
+             * @default {}
+             */
+            packs: {
                 [key: string]: string;
             };
         };
@@ -565,12 +614,47 @@ export interface components {
             /** Paused */
             paused: boolean;
         };
-        /** QuickActionOut */
-        QuickActionOut: {
-            /** Label */
-            label: string;
-            /** Feature Id */
-            feature_id: string;
+        /**
+         * ProposalOut
+         * @description A request the assistant proposed: the client shows it as a card to send, change or
+         *     cancel. What will be sent is shown in `fields`; the system's own arguments stay here.
+         */
+        ProposalOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Action Id */
+            action_id: string;
+            /** Title */
+            title: string;
+            /** Icon */
+            icon: string;
+            /** Summary */
+            summary: string;
+            /** Fields */
+            fields: components["schemas"]["FieldOut"][];
+            /** Notes */
+            notes: string[];
+            /** Warnings */
+            warnings: string[];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "proposed" | "sending" | "sent" | "failed" | "cancelled" | "expired";
+            /** Reference */
+            reference: string;
+            /** Outcome */
+            outcome: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Created At */
+            created_at?: string | null;
         };
         /**
          * StepOut
@@ -603,20 +687,6 @@ export interface components {
             choices: string[];
             /** Answered */
             answered?: string | null;
-        };
-        /**
-         * SubjectOut
-         * @description One subject open in a conversation, for staff to return to with a click.
-         */
-        SubjectOut: {
-            /** Id */
-            id: number;
-            /** Title */
-            title: string;
-            /** Procedure */
-            procedure: boolean;
-            /** Current */
-            current: boolean;
         };
         /** UploadOut */
         UploadOut: {
@@ -864,37 +934,6 @@ export interface operations {
             };
         };
     };
-    subjects_api_conversations__conversation_id__subjects_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                conversation_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SubjectOut"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     procedure_api_conversations__conversation_id__procedure_get: {
         parameters: {
             query?: never;
@@ -1015,6 +1054,101 @@ export interface operations {
                 };
                 content: {
                     "text/event-stream": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    proposals_api_conversations__conversation_id__actions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProposalOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_api_conversations__conversation_id__actions__proposal_id__confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProposalOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_api_conversations__conversation_id__actions__proposal_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProposalOut"];
                 };
             };
             /** @description Validation Error */

@@ -1,14 +1,21 @@
 import type { ReactNode } from 'react'
 import {
   BookOpen,
+  CalendarDays,
+  CalendarPlus,
+  CreditCard,
   FileText,
+  HandCoins,
+  Inbox,
   Landmark,
   LifeBuoy,
   ListChecks,
   MessageSquare,
   Package,
+  Shield,
   ShieldCheck,
   UserRound,
+  Wallet,
   type LucideIcon,
 } from 'lucide-react'
 import type { HomeCard } from '../api/endpoints'
@@ -25,6 +32,13 @@ const ICONS: Record<string, LucideIcon> = {
   'list-checks': ListChecks,
   package: Package,
   'shield-check': ShieldCheck,
+  shield: Shield,
+  wallet: Wallet,
+  'hand-coins': HandCoins,
+  'credit-card': CreditCard,
+  'calendar-days': CalendarDays,
+  'calendar-plus': CalendarPlus,
+  inbox: Inbox,
 }
 
 interface Props {

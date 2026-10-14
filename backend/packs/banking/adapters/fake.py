@@ -171,8 +171,10 @@ class FakeCoreBanking:
 class FakeServiceCatalog:
     async def search_products(self, query: str) -> list[dict[str, Any]]:
         """Products sharing a word with the query, best match first, as a catalogue search would:
-        "Business Current account" finds Business Current."""
+        "Business Current account" finds Business Current. An empty query lists them all."""
         words = set(re.findall(r"[a-z0-9]+", query.lower())) - {"account", "the", "a"}
+        if not words:
+            return [{"code": p["code"], "name": p["name"]} for p in PRODUCTS.values()]
         scored = []
         for p in PRODUCTS.values():
             names = set(re.findall(r"[a-z0-9]+", f"{p['name']} {p['code']}".lower()))

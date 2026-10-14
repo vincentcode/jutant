@@ -8,7 +8,11 @@
 
 Certain cases are decided without the model (`certain`): staff said what the message is (a step
 answer clicked on its card, Resume, Stop, "a new question"), staff locked a feature, there is no
-frame yet, or the message names an entity already in a frame (or a new one). Everything else is
+frame yet, or the message names an entity already in a frame (or a new one). A message that
+names nothing, with a subject open, is first asked about as a two-way question (`continues`):
+more about that subject, or something else? Most such messages are follow-ups, and a small model
+answers a two-way question reliably, where among ten options it drifts to a kind of help whose
+description sounds close ("what to do next" for "why was it not reversed?"). Everything else is
 read by the model (`read`), with the stack in view: one call, its reply checked against the
 options, asked once more if not; if still unclear, the caller decides what to do.
 """
@@ -27,8 +31,9 @@ Action = Literal["continue", "return", "new", "stop"]
 # What staff say a message is, so it is not read: a step answer clicked on its card, the answer
 # to "is that your answer or a new question?" or "is this about X, or something new?", the
 # paused procedure's Resume and Stop, a subject chip clicked to return to it, or a kind of help
-# picked to start (`start`, with the feature: the message is its title, not a question).
-ReplyAs = Literal["answer", "question", "resume", "stop", "return", "continue", "start"]
+# picked to start (`start`, with the feature: the message is its title, not a question), or a
+# value picked when the subject on top asked for what it needs (`detail`).
+ReplyAs = Literal["answer", "question", "resume", "stop", "return", "continue", "start", "detail"]
 
 INSTRUCTION = (
     "A staff member is working with an assistant. Their open subjects, most recent first:\n"
@@ -38,6 +43,13 @@ CONFIRMED = "confirm"  # what a confirm step records
 SAME_INSTRUCTION = (
     "A staff member was talking about: {subject}.\nIs their new message about that same one, "
     "or about a different one of the same kind? Choose one."
+)
+# The subject by what it is about ("transfer TX-0002"), not by its feature: asked "more about
+# Transaction lookup: transfer TX-0002?", a small model answered "something else" even for "why
+# did it fail?". Named plainly, with "it" allowed for, it answers reliably.
+CONTINUES_INSTRUCTION = (
+    "A staff member has been asking an assistant about {subject}. Is their new message about "
+    '{subject} (it may call it "it"), or about something else? Choose one.'
 )
 ATTEMPTS = 2
 
@@ -59,10 +71,15 @@ def certain(
     locked_feature: str | None,
     subject_id: int | None = None,
     step: PlaybookStep | None = None,
+    gives_detail: bool = False,
+    patterned: str | None = None,
 ) -> Reading | None:
     """The reading, when it does not need the model; else None. `subject_id`: the subject staff
     clicked (to return to it, or to say a message is about it); `step`: the step the top
-    procedure waits on, if any."""
+    procedure waits on, if any; `gives_detail`: the message gives something the subject on top
+    asked for (a phone number, a date); `patterned`: the one kind of help whose route pattern
+    the message matches, if one does ("book leave" is a leave request, even said while on the
+    leave balance, or just after picking it)."""
     top, procedure = stack.top, stack.procedure_frame()
     if reply_as == "return" and subject_id is not None and stack.get(subject_id) is not None:
         return Reading("return", subject_id, by="staff")
@@ -74,6 +91,8 @@ def certain(
         return Reading("continue", procedure.id, by="staff")
     if procedure is not None and reply_as == "resume":
         return Reading("return", procedure.id, by="staff")
+    if reply_as == "detail" and top is not None and not top.procedure:
+        return Reading("continue", top.id, by="staff")
     if reply_as == "question":
         return Reading("new", feature_id=locked_feature, by="staff")
     if top is None:
@@ -86,6 +105,14 @@ def certain(
         return Reading("new", feature_id=locked_feature, by="locked")
     if top.procedure and step is not None and _takes(step, text):
         return Reading("continue", top.id, by="step")
+    if not top.procedure and top.awaiting and gives_detail:
+        # it asked for what it needs, and this gives some: the reply, even naming a new entity
+        return Reading("continue", top.id, by="detail")
+    if not top.procedure and not mentioned and patterned and patterned != top.feature_id:
+        return Reading("new", feature_id=patterned, by="pattern")
+    if not top.procedure and not top.exchanges and not top.entities and not mentioned:
+        # staff just started this kind of help (picked it): the message is its first question
+        return Reading("continue", top.id, by="started")
     if top.procedure or not mentioned:
         return None  # a reply to a step, or a message naming nothing: read it
     if any(top.entities.get(kind) == value for kind, value in mentioned.items()):
@@ -101,6 +128,22 @@ def _takes(step: PlaybookStep, text: str) -> bool:
     return bool(step.lookup and step.lookup.pattern and re.search(step.lookup.pattern, text))
 
 
+async def continues(model: ModelProvider, text: str, subject: str) -> bool | None:
+    """Whether `text`, which names nothing, is about the open `subject` (True) or about
+    something else (False); None if the model could not tell. `subject` names what it is
+    about ("transfer TX-0002")."""
+    options = [
+        Option("same", f"about {subject}"),
+        Option("other", "about something else"),
+    ]
+    instruction = CONTINUES_INSTRUCTION.format(subject=subject)
+    for _ in range(ATTEMPTS):
+        chosen = await ask_model(model, instruction, text, options, unavailable_raises=True)
+        if chosen is not None:
+            return chosen == "same"
+    return None
+
+
 async def same_subject(model: ModelProvider, text: str, subject: str) -> bool | None:
     """Whether `text` is about `subject` (True) or another of the same kind (False); None if
     the model could not tell. Asked when the turn's reading chose a feature an open subject
@@ -112,7 +155,7 @@ async def same_subject(model: ModelProvider, text: str, subject: str) -> bool | 
     ]
     instruction = SAME_INSTRUCTION.format(subject=subject)
     for _ in range(ATTEMPTS):
-        chosen = await ask_model(model, instruction, text, options)
+        chosen = await ask_model(model, instruction, text, options, unavailable_raises=True)
         if chosen is not None:
             return chosen == "same"
     return None
@@ -134,7 +177,7 @@ async def read(
     subjects = "\n".join(f"{n}. {describe(f)}" for n, f in enumerate(stack.frames[:4], 1))
     instruction = INSTRUCTION.format(subjects=subjects)
     for _ in range(ATTEMPTS):
-        chosen = await ask_model(model, instruction, text, options)
+        chosen = await ask_model(model, instruction, text, options, unavailable_raises=True)
         if chosen is not None:
             return readings[chosen]
     return None

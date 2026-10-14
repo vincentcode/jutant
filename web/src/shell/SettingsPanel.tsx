@@ -15,11 +15,19 @@ interface Props {
   onSignOut: () => void
 }
 
+/** The person's role, or with several packs their role in each: "teller (banking), employee (hr)". */
+export function rolesOf(me: Me): string {
+  const packs = Object.entries(me.packs ?? {})
+  const words = (role: string) => role.replace(/_/g, ' ')
+  if (packs.length < 2) return words(me.role)
+  return packs.map(([pack, role]) => `${words(role)} (${pack})`).join(', ')
+}
+
 /** Who is signed in (read-only: the directory and the admin decide it), and the theme. */
 export function SettingsPanel({ me, theme, onTheme, onSignOut }: Props) {
   const details: [string, string | undefined][] = [
     ['Name', me?.display_name],
-    ['Role', me?.role.replace(/_/g, ' ')],
+    [me && Object.keys(me.packs ?? {}).length > 1 ? 'Roles' : 'Role', me && rolesOf(me)],
     ['Branch', me?.attributes?.branch],
     ['Staff number', me?.id],
   ]

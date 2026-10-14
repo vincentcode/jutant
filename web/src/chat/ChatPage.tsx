@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { CircleUserRound, ListChecks, X } from 'lucide-react'
+import { rolesOf } from '../shell/SettingsPanel'
 import * as api from '../api/endpoints'
 import type { Upload } from '../api/endpoints'
 import type { Choice } from '../api/events'
@@ -13,7 +14,7 @@ import { IconRail, type PanelId } from '../shell/IconRail'
 import { KnowledgePanel } from '../shell/KnowledgePanel'
 import { SettingsPanel } from '../shell/SettingsPanel'
 import { ConversationList } from './ConversationList'
-import { MessageList } from './MessageList'
+import { type ProposalHandlers, MessageList } from './MessageList'
 import { Composer } from './Composer'
 import { isBusy, useChatStream } from './useChatStream'
 
@@ -55,9 +56,17 @@ export function ChatPage() {
     enabled: Boolean(conversationId),
   })
 
+  // Requests the assistant proposed, each a card to send, change or cancel.
+  const proposals = useQuery({
+    queryKey: ['proposals', conversationId],
+    queryFn: () => api.proposals(conversationId!),
+    enabled: Boolean(conversationId),
+  })
+
   const onSettled = useCallback(
     (id: string) => {
       void queryClient.invalidateQueries({ queryKey: ['history', id] })
+      void queryClient.invalidateQueries({ queryKey: ['proposals', id] })
       void queryClient.invalidateQueries({ queryKey: ['conversations'] })
       void queryClient.invalidateQueries({ queryKey: ['procedure', id] })
     },
@@ -131,12 +140,19 @@ export function ChatPage() {
 
   /** Staff picked what a message is, when the assistant could not tell: it is sent again
    * saying so. When the assistant had asked them in words what they need ("How can I help?"),
-   * there is nothing to send again: the kind of help picked starts, and asks what they need. */
+   * there is nothing to send again: the kind of help picked starts, and asks what they need.
+   * When it asked for a value it needs (which channel), the value picked is staff's reply. */
   async function pick(text: string, choice: Choice, picked: number) {
     if (state.clarifyReason === 'talk' && choice.kind === 'feature') {
       const id = await ensureConversation()
       setStreamFor(id)
       void send(id, { text: choice.title, feature_id: choice.feature_id ?? undefined, reply_as: 'start', picked })
+      return
+    }
+    if (choice.kind === 'detail') {
+      const id = await ensureConversation()
+      setStreamFor(id)
+      void send(id, { text: choice.title, reply_as: 'detail', picked })
       return
     }
     switch (choice.kind) {
@@ -176,6 +192,46 @@ export function ChatPage() {
     )
   }
 
+  /** Send or cancel a card's request; the card then shows what happened. If the server says it
+   * can no longer change (sent from another tab, expired), the card is read again and the reason
+   * shown on it. */
+  async function decide(proposal: api.Proposal, send: boolean): Promise<void> {
+    if (!conversationId) return
+    const id = conversationId
+    try {
+      const done = send
+        ? await api.confirmProposal(id, proposal.id)
+        : await api.cancelProposal(id, proposal.id)
+      queryClient.setQueryData<api.Proposal[]>(['proposals', id], (list) => {
+        const kept = list ?? []
+        return kept.some((p) => p.id === done.id)
+          ? kept.map((p) => (p.id === done.id ? done : p))
+          : [...kept, done]
+      })
+    } catch (error) {
+      void queryClient.invalidateQueries({ queryKey: ['proposals', id] })
+      throw error
+    }
+  }
+
+  const onProposal: ProposalHandlers = {
+    send: (proposal) => decide(proposal, true),
+    cancel: (proposal) => decide(proposal, false),
+    // The request goes, and staff say what to change; the assistant proposes a new one.
+    change: async (proposal) => {
+      await decide(proposal, false)
+      setHint('Say what to change, for example “end on Thursday instead”')
+      document.getElementById('question')?.focus()
+    },
+  }
+
+  // Cards from history, and any the turn just proposed that history does not have yet.
+  const shownProposals = useMemo(() => {
+    const stored = proposals.data ?? []
+    const fresh = streamFor === conversationId ? state.proposals : []
+    return [...stored, ...fresh.filter((p) => !stored.some((s) => s.id === p.id))]
+  }, [proposals.data, state.proposals, streamFor, conversationId])
+
   async function attach(file: File): Promise<void> {
     const id = await ensureConversation()
     const uploaded = await api.upload(id, file)
@@ -206,7 +262,7 @@ export function ChatPage() {
   )
 
   return (
-    <div className="flex h-dvh">
+    <div className="flex h-dvh overflow-hidden">
       <a href="#question" className="skip-link">
         Skip to the question box
       </a>
@@ -257,7 +313,7 @@ export function ChatPage() {
             type="button"
             className="justify-self-end rounded-full p-1 text-muted hover:bg-hover hover:text-fg"
             aria-label={`Your account: ${me?.display_name ?? ''}`}
-            title={me ? `${me.display_name} · ${me.role.replace(/_/g, ' ')}` : undefined}
+            title={me ? `${me.display_name} · ${rolesOf(me)}` : undefined}
             onClick={() => setPanel(panel === 'settings' ? undefined : 'settings')}
           >
             <CircleUserRound aria-hidden className="size-6" />
@@ -273,6 +329,8 @@ export function ChatPage() {
               onAnswerStep={(answer) => void ask(answer, undefined, 'answer')}
               onRate={rate}
               featureTitles={featureTitles}
+              proposals={shownProposals}
+              onProposal={onProposal}
             />
             {streamFor === conversationId && state.choices?.length && state.question && !busy ? (
               <Picker

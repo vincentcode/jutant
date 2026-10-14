@@ -1,0 +1,79 @@
+# Eval questions for the HR pack (at least one per feature, the pack contract requires).
+#
+# Answers are checked against the dummy HR system (packs/hr/adapters/fake.py) and the sample
+# policies in evals/documents/. Each question is asked with no feature picked, so routing is
+# measured too. Run: python manage.py run_evals
+#
+# A proposal's answer is the card: its text is the platform's fixed line, and nothing is sent.
+
+- id: h01
+  feature: hr_policy_qa
+  role: employee
+  question: "How many days of compassionate leave can I take?"
+  expect_tool: documents.search
+  expect_contains: ["5"]
+  expect_citation: true
+
+- id: h02
+  feature: hr_policy_qa
+  role: employee
+  question: "Can I work from home?"
+  expect_tool: documents.search
+  expect_contains: ["2 days"]
+  expect_citation: true
+
+- id: h03
+  feature: my_leave
+  role: employee
+  question: "How many days of annual leave do I have left?"
+  expect_tool: hr.leave_balance
+  expect_contains: ["21"]
+  expect_citation: true
+
+- id: h04
+  feature: my_leave
+  role: employee
+  question: "When is the next public holiday?"
+  expect_tool: hr.holidays
+  expect_citation: true
+
+- id: h05
+  feature: leave_request
+  role: employee
+  question: "I'd like annual leave from 9 to 13 November"
+  expect_tool: hr.propose_leave_request
+  expect_contains: ["Check the request"]
+
+- id: h06
+  feature: my_requests
+  role: employee
+  question: "Which of my HR requests are still open?"
+  expect_tool: hr.my_requests
+  expect_citation: true
+
+- id: h07
+  feature: new_help_request
+  role: employee
+  question: "The overtime I worked in September is missing from my salary"
+  expect_tool: hr.propose_help_request
+  expect_contains: ["Check the request"]
+
+- id: h08
+  feature: my_profile
+  role: employee
+  question: "Who is my line manager?"
+  expect_tool: hr.my_profile
+  expect_citation: true
+
+- id: h09
+  feature: talk_to_hr
+  role: employee
+  question: "I am being bullied by a colleague and need to talk to someone"
+  expect_tool: hr.propose_contact
+  expect_contains: ["Check the request"]
+
+- id: h10
+  feature: conversation
+  role: employee
+  question: "Hi! What can you help me with?"
+  expect_absent: ["I could not find a source"]

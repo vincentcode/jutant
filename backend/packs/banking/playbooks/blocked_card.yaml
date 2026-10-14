@@ -1,4 +1,7 @@
 # Placeholder: step content must come from the bank's procedures.
+#
+# Step 2 looks the card up with the id staff give; step 3 shows its status and the block reason
+# the card system records ({2.field}), so staff choose the branch from the record, not memory.
 id: blocked_card
 title: Blocked card
 description: Customer reports that their card is blocked or declined.
@@ -9,36 +12,44 @@ steps:
     audience: [staff]
     expects: confirm
   - order: 2
+    title: Find the card
+    instruction: Enter the card id from the customer's profile (for example CRD-3002). Never ask for the full card number or the PIN.
+    audience: [staff]
+    expects: text
+    lookup: {tool: cards.get_card, argument: card_id, pattern: '(?i)\b(CRD-\d+)\b'}
+  - order: 3
     title: Find the block reason
-    instruction: Check the card status and tell me which reason is shown.
+    instruction: >-
+      Card {2.masked_number} is {2.status_in_words}. The card system's reason: {2.block_reason}.
+      Which reason is it?
     audience: [staff]
     expects: choice
     choices: [wrong_pin, fraud_hold, expired, other]
-    next_on: {wrong_pin: 3, fraud_hold: 4, expired: 5, other: 6}
-  - order: 3
+    next_on: {wrong_pin: 4, fraud_hold: 5, expired: 6, other: 7}
+  - order: 4
     title: Reset the PIN counter
-    instruction: Reset the PIN counter and ask the customer to retry.
+    instruction: Reset the PIN counter for card {2.masked_number} and ask the customer to retry.
     audience: [staff, customer]
     expects: confirm
-    next_on: {confirm: 7}
-  - order: 4
+    next_on: {confirm: 8}
+  - order: 5
     title: Refer to fraud
     instruction: Do not unblock the card. Refer the case to the fraud team.
     audience: [staff]
     expects: confirm
-    next_on: {confirm: 7}
-  - order: 5
+    next_on: {confirm: 8}
+  - order: 6
     title: Order a replacement
     instruction: Raise a replacement card request.
     audience: [staff, customer]
     expects: confirm
-    next_on: {confirm: 7}
-  - order: 6
+    next_on: {confirm: 8}
+  - order: 7
     title: Escalate
     instruction: Escalate to card operations with the status shown.
     audience: [staff]
     expects: confirm
-  - order: 7
+  - order: 8
     title: Close
     instruction: Confirm the outcome with the customer.
     audience: [staff, customer]

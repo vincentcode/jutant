@@ -6,6 +6,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from core.actions.types import Proposal
+
 MAX_QUESTION_CHARS = 4000
 
 
@@ -20,6 +22,7 @@ class Me(BaseModel):
     role: str
     display_name: str
     attributes: dict[str, str] = {}  # e.g. the branch, shown in Settings
+    packs: dict[str, str] = {}  # with several packs: the role in each (pack -> role)
 
 
 class HomeCardOut(BaseModel):
@@ -30,16 +33,10 @@ class HomeCardOut(BaseModel):
     label: str = ""
 
 
-class QuickActionOut(BaseModel):
-    label: str
-    feature_id: str
-
-
 class HomeOut(BaseModel):
-    """The home screen for the caller: only cards and actions for features their role may use."""
+    """The home screen for the caller: only cards for features their role may use."""
 
     cards: list[HomeCardOut] = []
-    quick_actions: list[QuickActionOut] = []
 
 
 class DocumentOut(BaseModel):
@@ -97,6 +94,30 @@ class StepOut(BaseModel):
     answered: str | None = None  # answered from a looked-up record
 
 
+class FieldOut(BaseModel):
+    label: str
+    value: str
+
+
+class ProposalOut(BaseModel):
+    """A request the assistant proposed: the client shows it as a card to send, change or
+    cancel. What will be sent is shown in `fields`; the system's own arguments stay here."""
+
+    id: UUID
+    action_id: str
+    title: str
+    icon: str
+    summary: str
+    fields: list[FieldOut]
+    notes: list[str]
+    warnings: list[str]
+    status: Literal["proposed", "sending", "sent", "failed", "cancelled", "expired"]
+    reference: str  # the request's number, once sent
+    outcome: str  # its status in that system, or why it could not be sent
+    expires_at: datetime
+    created_at: datetime | None = None  # where the card sits among the messages
+
+
 FeedbackReason = Literal["wrong_answer", "wrong_source", "wrong_feature", "too_slow", "other"]
 
 
@@ -132,9 +153,11 @@ class AskRequest(BaseModel):
     # During a procedure, what staff say the message is, so it is not read by the model: an
     # answer clicked on the step card, the reply to "your answer or a new question?", or the
     # paused procedure's Resume and Stop. Or "start": a kind of help staff picked (feature_id)
-    # after the assistant asked them what they need; the text is its title.
+    # after the assistant asked them what they need; the text is its title. Or "detail": a value
+    # staff picked when the assistant asked for one it needs (the text is its title).
     reply_as: (
-        Literal["answer", "question", "resume", "stop", "return", "continue", "start"] | None
+        Literal["answer", "question", "resume", "stop", "return", "continue", "start", "detail"]
+        | None
     ) = None
     # With reply_as "return": the subject chip staff clicked. With "continue": the subject staff
     # said the message is about, answering "is this about X, or something new?".
@@ -143,15 +166,6 @@ class AskRequest(BaseModel):
     # Recorded only, to measure how often the assistant asks and whether it needed to.
     picked: int | None = Field(default=None, ge=0, le=50)
     upload_id: UUID | None = None
-
-
-class SubjectOut(BaseModel):
-    """One subject open in a conversation, for staff to return to with a click."""
-
-    id: int
-    title: str  # "Transaction lookup: transfer TX-0002"
-    procedure: bool
-    current: bool  # the one the conversation is on
 
 
 class ProcedureOut(BaseModel):
@@ -175,3 +189,22 @@ class HealthOut(BaseModel):
     database: bool
     model: bool
     mcp_servers: dict[str, bool]
+
+
+def proposal_out(proposal: Proposal) -> ProposalOut:
+    draft = proposal.draft
+    return ProposalOut(
+        id=proposal.id,
+        action_id=proposal.action_id,
+        title=proposal.title,
+        icon=proposal.icon,
+        summary=draft.summary,
+        fields=[FieldOut(label=f.label, value=f.value) for f in draft.fields],
+        notes=list(draft.notes),
+        warnings=list(draft.warnings),
+        status=proposal.status,
+        reference=proposal.reference,
+        outcome=proposal.outcome,
+        expires_at=proposal.expires_at,
+        created_at=proposal.created_at,
+    )

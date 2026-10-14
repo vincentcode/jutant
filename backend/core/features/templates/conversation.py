@@ -9,9 +9,12 @@ decides itself:
   message with it, prefetch, procedures and citation checks included;
 - it cannot tell which of several fits: it calls `ask_which` with them, and staff are shown
   them to pick from (`Clarify`);
-- it calls none: it talks, in a few words, with no sources, and the kinds of help are offered
-  with its words (`talk`): staff pick one to start it, or just type. Always, not only when
-  the words end in a question: a small model asks "how can I help?" in many ways.
+- it calls none: it talks, in a few words, with no sources. When no subject is open (the
+  start of a conversation, or once everything is closed), the kinds of help are offered with
+  its words (`talk`): staff pick one to start it, or just type. Whatever its words: a small
+  model asks "how can I help?" in many ways. Not mid-conversation, where staff have a subject
+  and buttons would only crowd it, and not when staff are only thanking or closing: after the
+  reply, the model says which (one pick from three; if it cannot tell, they are offered).
 
 A call naming no offered feature is shown to the model once to correct; if it still fails,
 staff are offered every kind of help rather than a guess.
@@ -24,6 +27,7 @@ talking.
 from collections.abc import AsyncIterator, Sequence
 
 from core.events import Choice, Clarify, Event, HandOver, TextDelta
+from core.features.matching import Option, ask_model
 from core.features.templates.base import FeatureContext
 from core.types import Message, ModelReply, ToolCall, ToolSpec
 
@@ -37,6 +41,14 @@ PREFER = "Staff chose the quick action for {title}."
 WHICH = "Which of these do you need?"
 UNKNOWN = "{name} is not one of your tools. Call one of them, or reply in words."
 ATTEMPTS = 2
+# Three options of one shape: against a catch-all ("anything else"), a small model always picks
+# the catch-all.
+CLOSING = "What is the staff member doing in their message to the assistant? Choose one."
+CLOSING_OPTIONS = (
+    Option("thanks", "thanking the assistant or saying goodbye"),
+    Option("greeting", "greeting the assistant or saying hello"),
+    Option("request", "asking a question or asking for help"),
+)
 
 
 class ConversationTemplate:
@@ -76,7 +88,7 @@ class ConversationTemplate:
                 if not said and reply.text:
                     said = reply.text.strip()
                     yield TextDelta(said)
-                if offers:  # what it can do, to pick from or not
+                if offers and not ctx.subjects_open and not await _closing(ctx):
                     yield Clarify(said.strip(), _choices(list(offers), offers), "talk")
                 return
             call = reply.tool_calls[0]
@@ -93,6 +105,11 @@ class ConversationTemplate:
             ]
         yield TextDelta(WHICH)  # still no valid call: every kind of help, not a guess
         yield Clarify(WHICH, _choices(list(offers), offers), "no_valid_call")
+
+
+async def _closing(ctx: FeatureContext) -> bool:
+    """Staff are only thanking or closing: nothing to offer them."""
+    return await ask_model(ctx.model, CLOSING, ctx.question, CLOSING_OPTIONS) == "thanks"
 
 
 def _tools(offers: Sequence[tuple[str, str, str]]) -> list[ToolSpec]:

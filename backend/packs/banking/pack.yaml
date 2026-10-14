@@ -11,9 +11,12 @@ mcp_servers:
   - platform: documents
   - pack: transactions
   - pack: services
+  - pack: accounts
+  - pack: lending
+  - pack: cards
 
-# The client's home screen: starting points and the quick actions in the question box. Each
-# starts a feature; staff see only those their role may use. Icons are Lucide icon names.
+# The client's home screen: starting points, each starting a feature; staff see only those their
+# role may use. Icons are Lucide icon names.
 home:
   cards:
     - title: Investigate a transaction
@@ -26,6 +29,21 @@ home:
       feature: customer_360
       icon: user-round
       label: Customer Ops
+    - title: Check an account
+      description: Holds and blocks, why money can't leave, signatories, charges, standing orders, cheques.
+      feature: account_services
+      icon: wallet
+      label: Accounts
+    - title: Loans and deposits
+      description: Arrears, instalments and repayments, fixed deposits and their maturity.
+      feature: loans_and_deposits
+      icon: hand-coins
+      label: Lending
+    - title: Card problems
+      description: A card's status, why it was blocked, and why a payment was declined.
+      feature: card_lookup
+      icon: credit-card
+      label: Cards
     - title: Ask about procedures
       description: Policies, KYC rules and what a customer must provide.
       feature: policy_qa
@@ -36,12 +54,6 @@ home:
       feature: troubleshooting
       icon: life-buoy
       label: Procedures
-  quick_actions:
-    - {label: Transaction, feature: transaction_lookup}
-    - {label: Customer, feature: customer_360}
-    - {label: Policy, feature: policy_qa}
-    - {label: Product, feature: product_lookup}
-    - {label: Document, feature: document_summary_extraction}
 
 # What each tool looks at, in staff's words. The client shows "Checking the transfer…",
 # "Checked the transfer", "Not allowed: the account's transactions".
@@ -54,6 +66,16 @@ tool_labels:
   services.get_product: the product's details
   services.get_requirements: the request's requirements
   services.customer_summary: the customer's accounts
+  accounts.get_status: the account's status
+  accounts.get_mandate: the account's signatories
+  accounts.list_charges: the account's charges
+  accounts.list_standing_orders: the account's standing orders
+  accounts.get_cheque: the cheque
+  lending.list_facilities: the customer's loans and deposits
+  lending.get_loan: the loan
+  lending.get_deposit: the deposit
+  cards.list_cards: the customer's cards
+  cards.get_card: the card
 
 classifications:
   - {label: public, roles: all}
@@ -120,23 +142,35 @@ features:
     title: Transaction lookup
     suggestions: ["Why did transfer TX-0002 fail?"]  # offered on the first screen; must be answerable
     description: "One account's transactions, or one transfer by its reference: activity, status, why it failed."
-    ask_for: "Which transfer or account? Give me the transfer reference (for example TX-0002) or the 10-digit account number."
     prompt: prompts/transaction_lookup.md
+    # TRIAL: staff are guided to what the lookup needs: the channel, then how to find it.
+    # Every channel is searched in core banking until the other systems are connected.
+    details:
+      channel:
+        label: the channel
+        ask: "Which channel was the transaction made on?"
+        choose: {mobile_app: Mobile app, ussd: USSD, wallet: Wallet pull or push, branch: Branch, unsure: Not sure}
+        words: {mobile_app: [the app, mobile banking]}
+      reference: {label: "the transaction reference (for example TX-0002)", title: Transaction reference, entity: transfer}
+      account: {label: the 10-digit account number, title: Account number, entity: account}
+    needs:
+      first: [channel]
+      one_of: [[reference], [account]]
     # documents.search: a failed transfer's code is looked up in the error-code reference (a
     # second prefetch round, from the record's failure_code), so "when does the money come
     # back?" is answered from the record and the reference together.
     tools: [transactions.list, transactions.get_status, documents.search]
     route:
-      patterns: ['(?i)\bTX-\d+\b', '\b\d{10}\b']
+      patterns: ['(?i)\bTX-\d+\b']
       examples:
         - "Has the salary been credited to this account yet?"
         - "What is the status of the transfer the customer made yesterday?"
         - "List the recent debits on the customer's account."
     prefetch:
       - tool: transactions.get_status
-        arguments: {reference: {entity: transfer}}
+        arguments: {reference: {detail: reference}}
       - tool: transactions.list
-        arguments: {account_number: {entity: account}}
+        arguments: {account_number: {detail: account}}
       - tool: documents.search
         arguments: {query: {entity: error_code}}
   - id: code_explainer
@@ -160,6 +194,14 @@ features:
     description: "Which application forms, signatures and approvals a request needs before it can be submitted."
     prompt: prompts/form_guidance.md
     tools: [services.get_requirements, documents.search]
+    # The request types the bank's catalogue has requirement records for: the model picks the
+    # one a question is about (or none), and the record is fetched in code.
+    prefetch:
+      - tool: services.get_requirements
+        arguments:
+          request_type:
+            choose:
+              joint_account_opening: "Opening an account held by two or more people"
     route:
       examples:
         - "What paperwork is needed to add a signatory to an account?"
@@ -171,9 +213,9 @@ features:
     suggestions: ["A customer's card is blocked. Walk me through it."]  # offered on the first screen; must be answerable
     description: "Step-by-step help to fix a customer's problem: a blocked card, a dormant account, a failed transfer."
     prompt: prompts/troubleshooting.md
-    # For procedure steps that look a record up (failed_transfer). The model never calls them:
+    # For procedure steps that look a record up (failed_transfer, blocked_card). The model never calls them:
     # procedures choose their own steps.
-    tools: [transactions.get_status]
+    tools: [transactions.get_status, cards.get_card]
     route:
       examples:
         - "The customer's card was declined at the ATM, help me sort it out."
@@ -200,19 +242,123 @@ features:
     template: record_summary
     title: Customer 360 summary
     suggestions: ["Give me a summary of customer C1001."]  # offered on the first screen; must be answerable
-    description: "Overview of one customer by customer number: their accounts, balances, recent activity and open requests."
+    description: "Overview of one customer by customer number: their accounts, balances, recent activity, open requests, KYC, loans, deposits and cards."
     ask_for: "Which customer? Give me their customer number, for example C1001."
     prompt: prompts/customer_360.md
     tools: [services.customer_summary]
     roles: [customer_service, credit_officer, branch_manager]
+    # No pattern for a customer number: loans, deposits and cards are looked up by it too, so
+    # it names who, not what is asked.
     route:
-      patterns: ['(?i)\bC\d{4,}\b']
       examples:
+        - "Brief me on this customer before my meeting with them."
         - "Tell me everything about this customer's relationship with the bank."
         - "What accounts and open requests does the customer have?"
     prefetch:
       - tool: services.customer_summary
         arguments: {customer_number: {entity: customer}}
+
+  - id: account_services
+    template: record_lookup
+    title: Account status and services
+    suggestions: ["Why can't the customer take money out of account 0011223344?"]  # must be answerable
+    description: "One account's status and services: holds, liens and blocks, why money cannot leave it, its signatories and mandate, charges and fees, standing orders, cheques."
+    prompt: prompts/account_services.md
+    tools:
+      - accounts.get_status
+      - accounts.get_mandate
+      - accounts.list_charges
+      - accounts.list_standing_orders
+      - accounts.get_cheque
+      - documents.search
+    details:
+      account: {label: the 10-digit account number, title: Account number, entity: account}
+      cheque: {label: the cheque number, title: Cheque number, entity: cheque}
+    needs:
+      one_of: [[account]]
+    route:
+      examples:
+        - "Why is part of the balance on hold?"
+        - "The customer cannot withdraw from their savings account at the counter. Why not?"
+        - "Why was the customer charged a fee on their account?"
+        - "Is there a lien on this account?"
+        - "Who are the signatories and how many must sign?"
+        - "Why did the customer's standing order not go through?"
+        - "What is this fee taken from the account?"
+        - "Was the cheque paid or returned?"
+    # One of the account's records, the one the question is about (`when`); a cheque return
+    # code (R01) is then looked up in the bank's reference documents.
+    prefetch:
+      - tool: accounts.get_status
+        when: "whether money can leave the account: its balance, holds, liens, blocks, limits or status"
+        arguments: {account_number: {detail: account}}
+      - tool: accounts.get_mandate
+        when: "who may operate or sign on the account"
+        arguments: {account_number: {detail: account}}
+      - tool: accounts.list_charges
+        when: "a charge or fee taken from the account"
+        arguments: {account_number: {detail: account}}
+      - tool: accounts.list_standing_orders
+        when: "a standing order or regular payment from the account"
+        arguments: {account_number: {detail: account}}
+      - tool: accounts.get_cheque
+        when: "a cheque"
+        arguments: {account_number: {detail: account}, cheque_number: {detail: cheque}}
+      - tool: documents.search
+        arguments: {query: {entity: error_code}}
+  - id: loans_and_deposits
+    template: record_lookup
+    title: Loans and deposits
+    suggestions: ["How much is loan LN-1002 in arrears?"]  # must be answerable
+    description: "A customer's loans and fixed deposits: balance, arrears and days past due, instalments, disbursement, deposit rate and maturity, rollover, early withdrawal."
+    prompt: prompts/loans_and_deposits.md
+    tools: [lending.list_facilities, lending.get_loan, lending.get_deposit]
+    roles: [customer_service, credit_officer, branch_manager]
+    details:
+      loan: {label: the loan number (for example LN-1001), title: Loan number, entity: loan}
+      deposit: {label: the deposit number (for example FD-2001), title: Deposit number, entity: deposit}
+      customer: {label: the customer number (for example C1001), title: Customer number, entity: customer}
+    needs:
+      one_of: [[loan], [deposit], [customer]]
+    route:
+      patterns: ['(?i)\bLN-\d+\b', '(?i)\bFD-\d+\b']
+      examples:
+        - "Is the customer behind on their loan repayments?"
+        - "When is the next loan instalment due?"
+        - "Has the loan been disbursed yet?"
+        - "When does the customer's fixed deposit mature?"
+        - "What happens if the customer breaks the fixed deposit early?"
+    prefetch:
+      - tool: lending.get_loan
+        arguments: {loan_id: {detail: loan}}
+      - tool: lending.get_deposit
+        arguments: {deposit_id: {detail: deposit}}
+      - tool: lending.list_facilities
+        arguments: {customer_number: {detail: customer}}
+  - id: card_lookup
+    template: record_lookup
+    title: Card lookup
+    suggestions: ["Why was card CRD-3001 declined?"]  # must be answerable
+    description: "A customer's cards: whether a card is active or blocked and why, its limits and settings, and why a payment or withdrawal was declined."
+    prompt: prompts/card_lookup.md
+    tools: [cards.list_cards, cards.get_card, documents.search]
+    details:
+      card: {label: the card id (for example CRD-3001), title: Card id, entity: card}
+      customer: {label: the customer number (for example C1001), title: Customer number, entity: customer}
+    needs:
+      one_of: [[card], [customer]]
+    route:
+      patterns: ['(?i)\bCRD-\d+\b']
+      examples:
+        - "Why was the customer's card declined online?"
+        - "Is the customer's debit card blocked?"
+        - "The ATM kept the customer's debit card. Why did their card stop working?"
+        - "When does the card expire?"
+    prefetch:
+      - tool: cards.get_card
+        arguments: {card_id: {detail: card}}
+      - tool: cards.list_cards
+        arguments: {customer_number: {detail: customer}}
 
 # What staff talk about. The conversation keeps the current one of each type for every subject,
 # so lookups use it without it being repeated ("why did it fail?" after TX-0002), and a message
@@ -224,6 +370,11 @@ entities:
   customer: {pattern: '(?i)\b(C\d{4,})\b', words: [customer], name_field: name}
   product: {pattern: '\b([A-Z]{3}-[A-Z]{3})\b', words: [product], name_field: name}
   error_code: {pattern: '\b([A-Z]\d{2,3})\b', words: [code, error]}
+  loan: {pattern: '(?i)\b(LN-\d+)\b', words: [loan]}
+  deposit: {pattern: '(?i)\b(FD-\d+)\b', words: [deposit, fixed deposit]}
+  card: {pattern: '(?i)\b(CRD-\d+)\b', words: [card]}
+  # Six digits only after the word: an amount ("250000") is not a cheque.
+  cheque: {pattern: '(?i)\bcheque\s*(?:no\.?|number|#)?\s*(\d{6})\b', words: [cheque]}
 
 extraction_schemas:
   - {type: id_card, fields: [full_name, id_number, date_of_birth, expiry_date]}

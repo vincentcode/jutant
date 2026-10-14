@@ -63,3 +63,32 @@ def _strip(data: Any, hidden: frozenset[str]) -> Any:
     if isinstance(data, list | tuple):
         return [_strip(item, hidden) for item in data]
     return data
+
+
+class PackPolicies:
+    """The rules of several packs, for a server they share (documents): each call is checked
+    against the rules of the pack the caller acts in (`Caller.pack`). A caller with no pack
+    (one pack loaded) gets the first's. A pack not loaded has no rules: denied."""
+
+    def __init__(self, engines: dict[str, PolicyEngine]):
+        if not engines:
+            raise ValueError("no packs")
+        self.engines = engines
+        self.first = next(iter(engines.values()))
+
+    def _for(self, caller: Caller) -> PolicyEngine | None:
+        return self.engines.get(caller.pack) if caller.pack else self.first
+
+    def authorize(
+        self,
+        caller: Caller,
+        tool: str,
+        arguments: dict[str, Any],
+        record: dict[str, Any] | None = None,
+    ) -> Decision:
+        engine = self._for(caller)
+        return engine.authorize(caller, tool, arguments, record) if engine else NO_RULE
+
+    def filter(self, caller: Caller, tool: str, data: Any) -> Any:
+        engine = self._for(caller)
+        return engine.filter(caller, tool, data) if engine else data

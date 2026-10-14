@@ -129,6 +129,25 @@ describe('MessageList', () => {
     expect(screen.getAllByText('Why did TX-0002 fail?')).toHaveLength(1)
     expect(screen.getByText('Finding the right help…')).toBeInTheDocument()
   })
+
+  it('keeps a finished answer shown until history has it, then shows it once', () => {
+    const done = {
+      ...initialStreamState,
+      status: 'done' as const,
+      question: 'Why did TX-0002 fail?',
+      text: 'The beneficiary account is closed.',
+    }
+    const stored = { ...history[1]!, content: done.text }
+    const { rerender } = render(<MessageList messages={[]} stream={done} busy={false} onAnswerStep={none} />)
+    expect(screen.getByText('Why did TX-0002 fail?')).toBeInTheDocument()
+    expect(screen.getByText(done.text)).toBeInTheDocument()
+
+    rerender(
+      <MessageList messages={[history[0]!, stored]} stream={done} busy={false} onAnswerStep={none} />,
+    )
+    expect(screen.getAllByText('Why did TX-0002 fail?')).toHaveLength(1)
+    expect(screen.getAllByText(done.text)).toHaveLength(1)
+  })
 })
 
 describe('Composer', () => {

@@ -80,7 +80,10 @@ async def api(*replies: ModelReply) -> AsyncIterator[Api]:
     secret = settings.JUTANT_CALLER_SECRET
     servers = {
         "documents": documents_server(
-            DjangoDocumentStore(None), engine, secret, pack.readable_classifications
+            DjangoDocumentStore(None),
+            engine,
+            secret,
+            lambda caller: pack.readable_classifications(caller.role),
         ).mcp,
         **{name: s.mcp for name, s in build_servers(engine, secret, "fake").items()},
     }

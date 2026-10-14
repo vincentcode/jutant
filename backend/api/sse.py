@@ -15,9 +15,10 @@ from dataclasses import asdict
 from typing import Any
 
 from api.queue import GenerationQueue
-from api.schemas import StepOut
+from api.schemas import StepOut, proposal_out
 from core.errors import PolicyDenied
 from core.events import (
+    ActionProposed,
     Clarify,
     Completed,
     Event,
@@ -89,6 +90,8 @@ def to_frame(event: Event, labels: Mapping[str, str] | None = None) -> str:
             )
         case Failed(reason):
             return frame("failed", {"reason": reason})
+        case ActionProposed(proposal):
+            return frame("action_proposed", proposal_out(proposal).model_dump(mode="json"))
         case Clarify(question, choices, reason):
             return frame(
                 "clarify",

@@ -6,10 +6,11 @@ History is capped because a small model on CPU slows down sharply as the prompt 
 from core.types import Feature, Message
 
 # The platform's own rule, for every pack and feature: the assistant reads, it never acts. A
-# small model otherwise offers "shall I proceed with the transfer?" after looking one up.
+# small model otherwise offers "shall I proceed with the transfer?" after looking one up. In
+# the platform's words only: a pack's system prompt names its own actions.
 READ_ONLY = (
-    "You cannot make changes, payments or transfers, or act on accounts or records, and never "
-    "offer to. If asked to, say so, and say how staff can do it."
+    "You cannot change anything or carry out an action in any system, and never offer to. If "
+    "asked to, say so, and say how staff can do it."
 )
 
 

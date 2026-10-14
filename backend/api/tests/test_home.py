@@ -24,7 +24,7 @@ async def test_home_shows_only_what_the_role_may_use() -> None:
 
     assert "customer_360" not in features(teller, "cards")  # tellers may not use it
     assert "customer_360" in features(service, "cards")
-    assert "customer_360" not in features(teller, "quick_actions")
+    assert "quick_actions" not in teller  # the question box has none: the assistant decides
     card = teller["cards"][0]
     assert (card["title"], card["icon"], card["label"]) == (
         "Investigate a transaction",

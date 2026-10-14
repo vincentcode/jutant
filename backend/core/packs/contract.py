@@ -16,13 +16,20 @@
 - every route pattern is a valid regular expression;
 - every prefetched call uses one of its feature's tools, with arguments the tool accepts, and
   each `match` is a valid regular expression with at most one group;
-- every feature has at least one eval question.
+- a feature's details name known entity types, its needs name its details (`by` one asked
+  first, with values to pick from, and `one_of_by` only those values), and its prefetch calls
+  use only its details;
+- every feature has at least one eval question;
+- every action's propose tool is listed by a feature and its perform tool by none (the model
+  never holds a tool that does anything), both are offered by a pack server, the perform tool
+  takes `request_id`, and its roles are the pack's.
 """
 
 import re
 
+from core.actions.service import REQUEST_ID
 from core.packs.loader import SYSTEM_PROMPT, Pack
-from core.packs.manifest import PrefetchDef
+from core.packs.manifest import FeatureDef, PrefetchDef
 from core.playbooks.runner import PLACEHOLDER
 from core.types import Playbook, ToolSpec
 
@@ -55,6 +62,13 @@ def check(pack: Pack, tool_specs: list[ToolSpec]) -> list[str]:
                 problems.append(f"feature {f.id}: route pattern {pattern!r}: {error}")
         for p in f.prefetch:
             problems.extend(_prefetch_problems(f.id, f.tools, p, specs, set(m.entities)))
+            for name, argument in p.arguments.items():
+                if argument.detail and argument.detail not in f.details:
+                    problems.append(
+                        f"feature {f.id}: prefetch {p.tool} argument {name}: unknown detail "
+                        f"{argument.detail}"
+                    )
+        problems.extend(_needs_problems(f, set(m.entities)))
         if f.ask_for and not f.prefetch:
             problems.append(f"feature {f.id}: ask_for needs prefetch calls to ask for")
         if f.follow_ups and f.follow_ups not in feature_ids:
@@ -69,9 +83,6 @@ def check(pack: Pack, tool_specs: list[ToolSpec]) -> list[str]:
     for card in m.home.cards:
         if card.feature not in feature_ids:
             problems.append(f"home card {card.title!r}: unknown feature {card.feature}")
-    for action in m.home.quick_actions:
-        if action.feature not in feature_ids:
-            problems.append(f"quick action {action.label!r}: unknown feature {action.feature}")
     for tool in sorted(set(m.tool_labels) - tools):
         problems.append(f"tool_labels names {tool}, which no pack server offers")
 
@@ -99,6 +110,8 @@ def check(pack: Pack, tool_specs: list[ToolSpec]) -> list[str]:
         problems.extend(_branches_running_into_each_other(playbook))
         problems.extend(_lookup_problems(playbook, specs, playbook_tools))
 
+    problems.extend(_action_problems(pack, tools, specs, roles))
+
     if m.default_feature not in feature_ids:
         problems.append(f"default_feature {m.default_feature} is not a feature")
     if not _non_empty(pack, SYSTEM_PROMPT):
@@ -107,6 +120,34 @@ def check(pack: Pack, tool_specs: list[ToolSpec]) -> list[str]:
     asked = {q.get("feature") for q in pack.eval_questions}
     for feature_id in sorted(feature_ids - asked):
         problems.append(f"feature {feature_id} has no eval question")
+    return problems
+
+
+def _action_problems(
+    pack: Pack, tools: set[str], specs: dict[str, ToolSpec], roles: set[str]
+) -> list[str]:
+    problems: list[str] = []
+    listed = {t for f in pack.manifest.features for t in f.tools}
+    ids: set[str] = set()
+    for a in pack.manifest.actions:
+        where = f"action {a.id}"
+        if a.id in ids:
+            problems.append(f"{where}: declared twice")
+        ids.add(a.id)
+        for tool in (a.propose, a.perform):
+            if tool not in tools:
+                problems.append(f"{where}: tool {tool} is not offered by any pack server")
+        if a.propose not in listed:
+            problems.append(f"{where}: no feature lists its propose tool {a.propose}")
+        if a.perform in listed:
+            problems.append(f"{where}: a feature lists its perform tool {a.perform}")
+        perform = specs.get(a.perform)
+        if perform is not None and REQUEST_ID not in perform.input_schema.get("properties", {}):
+            problems.append(f"{where}: perform tool {a.perform} must take {REQUEST_ID}")
+        for role in sorted(set(a.roles) - roles):
+            problems.append(f"{where}: unknown role {role}")
+        if a.expires_s <= 0:
+            problems.append(f"{where}: expires_s must be positive")
     return problems
 
 
@@ -204,6 +245,34 @@ def _prefetch_problems(
             problems.append(f"{where}: argument {name}: {error}")
         if argument.entity and argument.entity not in (entities or set()):
             problems.append(f"{where}: argument {name}: unknown entity {argument.entity}")
+    return problems
+
+
+def _needs_problems(f: FeatureDef, entities: set[str]) -> list[str]:
+    where = f"feature {f.id}"
+    problems = [
+        f"{where}: detail {name}: unknown entity {d.entity}"
+        for name, d in f.details.items()
+        if d.entity and d.entity not in entities
+    ]
+    needs = f.needs
+    if needs is None:
+        return problems
+    named = [*needs.first, *(n for s in needs.one_of for n in s)]
+    named += [n for sets in needs.one_of_by.values() for s in sets for n in s]
+    for name in sorted(set(named) - set(f.details)):
+        problems.append(f"{where}: needs names unknown detail {name}")
+    if needs.by is not None:
+        by = f.details.get(needs.by)
+        if needs.by not in needs.first or by is None or not by.choose:
+            problems.append(f"{where}: needs.by must be a detail asked first, with values to pick")
+        else:
+            for value in sorted(set(needs.one_of_by) - set(by.choose)):
+                problems.append(f"{where}: needs.one_of_by: {value} is not a value of {needs.by}")
+    elif needs.one_of_by:
+        problems.append(f"{where}: needs.one_of_by needs needs.by")
+    if not any(a.detail for p in f.prefetch for a in p.arguments.values()):
+        problems.append(f"{where}: needs details that no prefetch call uses")
     return problems
 
 

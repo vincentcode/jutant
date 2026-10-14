@@ -1,13 +1,26 @@
 from django.contrib import admin
 
-from apps.identity.models import LoginAttempt, Staff
+from apps.identity.models import LoginAttempt, PackRole, Staff
+
+
+class PackRoleInline(admin.TabularInline):
+    """Roles in other packs: the same person as an employee in HR, say."""
+
+    model = PackRole
+    extra = 1
+    fields = ("pack", "role", "attributes")
 
 
 @admin.register(Staff)
 class StaffAdmin(admin.ModelAdmin):
-    list_display = ("staff_number", "role", "is_active", "created_at")
+    list_display = ("staff_number", "role", "other_packs", "is_active", "created_at")
     list_filter = ("role", "is_active")
     search_fields = ("staff_number", "user__username")
+    inlines = [PackRoleInline]
+
+    @admin.display(description="Roles in other packs")
+    def other_packs(self, staff: Staff) -> str:
+        return ", ".join(str(r) for r in staff.pack_roles.all())
 
 
 @admin.register(LoginAttempt)

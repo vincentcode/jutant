@@ -10,10 +10,19 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 from uuid import UUID
 
+from core.actions.drafts import read_draft
 from core.context.entities import values_in
 from core.errors import InvalidToolCall, ModelUnavailable, UnknownTool
 from core.events import Event, Failed, TextDelta, ToolFinished, ToolStarted
-from core.features.prefetch import planned_calls
+from core.features.prefetch import chosen_calls, planned_calls
+from core.features.records import (
+    NONE,
+    document_sources,
+    facts,
+    field_asked,
+    not_shown,
+    single_record,
+)
 from core.observability import Trace
 from core.ports import AuditSink, ModelProvider, PlaybookStore
 from core.types import (
@@ -58,6 +67,9 @@ class FeatureContext:
     # The pack's entity types: a prefetched record's values that are ids of these (a failure
     # code) let a second round of prefetch calls be made (the code's explanation).
     entity_types: tuple[EntityType, ...] = ()
+    # The pack's propose tools (`core.actions`): a call that returns a draft ends the turn, and
+    # the orchestrator shows the draft as a card to send. The model writes nothing after it.
+    proposals: frozenset[str] = frozenset()
     # The kinds of help the caller's role has, as (feature id, title, description): what the
     # assistant can say it does, and the features the conversation can pass a turn to.
     offers: tuple[tuple[str, str, str], ...] = ()
@@ -66,10 +78,16 @@ class FeatureContext:
     # What the assistant can and cannot do for this caller, from the pack (`core.features.
     # catalogue`): so questions about it are answered from facts, not invented.
     catalogue: str = ""
+    # Whether the conversation has subjects open besides this turn's: the conversation offers
+    # the kinds of help only when none is, at the start or once everything is closed.
+    subjects_open: bool = False
     # What searches read: the question, with the subject's document or procedure step, if any.
     search_text: str = ""
     # The subject's current entities (type -> id), for prefetch calls: TX-0002 named earlier.
     entities: dict[str, str] = field(default_factory=dict)
+    # The details staff gave for it (name -> value: the system to look in, a date), for
+    # prefetch calls (`core.features.needs`).
+    details: dict[str, str] = field(default_factory=dict)
 
     @property
     def lookup(self) -> str:
@@ -84,12 +102,13 @@ class FeatureTemplate(Protocol):
 
 
 async def tool_loop(
-    ctx: FeatureContext, extra_calls: Sequence[ToolCall] = ()
+    ctx: FeatureContext, extra_calls: Sequence[ToolCall] = (), records: bool = False
 ) -> AsyncIterator[Event]:
     """Model, tool calls, model again, until the model answers in text.
 
-    The feature's prefetch calls whose arguments the question (or the subject) supplies are
-    made first, in code, with any `extra_calls` the template adds; then a second round, for
+    The feature's prefetch calls whose arguments the question (or the subject) supplies, or
+    the model picks from the pack's values, are made first, in code, with any `extra_calls`
+    the template adds; then a second round, for
     calls that only the fetched records make possible (a record's failure code, looked up in
     the codes' document). The model starts with their results. The model sees only the routed
     feature's tools. Every call goes through the gateway. A failed call of the model's is
@@ -105,15 +124,26 @@ async def tool_loop(
 
     Replies are streamed, except one that may still be dropped that way.
 
+    With `records`, when the calls made in code fetched exactly one record, its facts are set
+    out in code and the model picks which field the question is about; if none says it, the
+    answer is written in code ("the record does not show that"), see `core.features.records`.
+
     A call the policy refuses ends the turn at once, as `denied`: the model cannot change who
     the caller is, and asking it to write about the refusal would only keep staff waiting.
     """
     messages = list(ctx.messages)
     tools = ctx.gateway.catalog.specs_for(ctx.feature.tools)
     made: set[tuple[str, str]] = set()
+    chosen = await chosen_calls(ctx.model, ctx.feature, ctx.question, ctx.entities, ctx.details)
     rounds = (
-        lambda: [*planned_calls(ctx.feature, ctx.lookup, ctx.entities), *extra_calls],
-        lambda: planned_calls(ctx.feature, ctx.lookup, {**_pointed_to(ctx), **ctx.entities}),
+        lambda: [
+            *planned_calls(ctx.feature, ctx.lookup, ctx.entities, ctx.details),
+            *chosen,
+            *extra_calls,
+        ],
+        lambda: planned_calls(
+            ctx.feature, ctx.lookup, {**_pointed_to(ctx), **ctx.entities}, ctx.details
+        ),
     )
     for plan in rounds:
         for call in plan():
@@ -127,7 +157,16 @@ async def tool_loop(
             if ctx.results[-1].error == DENIED:
                 yield Failed(DENIED)
                 return
+            if proposes(ctx, call, ctx.results[-1]):
+                return  # made in code from what staff gave: the card is the answer
             messages.append(Message("tool", tool_message(ctx.results[-1]), tool_call_id=call.id))
+
+    if records and (record := single_record(ctx.results)) is not None:
+        field = await field_asked(ctx.model, ctx.question, record)
+        if field == NONE:
+            yield TextDelta(not_shown(record, document_sources(ctx.results)))
+            return
+        messages.append(Message("system", facts(record, field)))
 
     failures = 0
     nudged = False
@@ -163,6 +202,8 @@ async def tool_loop(
             if result.error == DENIED:
                 yield Failed(DENIED)
                 return
+            if proposes(ctx, call, result):
+                return  # the card speaks for itself; nothing is sent until it is confirmed
             messages.append(Message("tool", tool_message(result), tool_call_id=call.id))
             if not result.ok:
                 failures += 1
@@ -180,6 +221,12 @@ def _pointed_to(ctx: FeatureContext) -> dict[str, str]:
             for kind, value in values_in(result.data, ctx.entity_types).items():
                 found.setdefault(kind, value)
     return found
+
+
+def proposes(ctx: FeatureContext, call: ToolCall, result: ToolResult) -> bool:
+    """Whether a call proposed something to send: a propose tool that returned a draft. One
+    that refused (no draft) goes back to the model, to say why."""
+    return call.name in ctx.proposals and result.ok and read_draft(result.data) is not None
 
 
 async def run_call(ctx: FeatureContext, call: ToolCall) -> AsyncIterator[Event]:

@@ -43,7 +43,7 @@ from django.core.management.base import BaseCommand, CommandError, CommandParser
 from config.container import build_runtime
 from core.evals import labels as label_scoring
 from core.evals.transcript import HELDOUT_CALLER_ID, Label, Transcript, replay
-from core.types import Caller
+from core.types import Caller, PackRole
 
 
 class Command(BaseCommand):
@@ -86,11 +86,17 @@ class Command(BaseCommand):
             done: dict[str, list[Transcript]] = {}
             for item in items:
                 staff = {**default, **(item.get("staff") or {})}
+                as_role = role or staff.get("role", "teller")
+                attributes = {"branch": staff.get("branch", "")}
+                home = runtime.deployment.pack_for_role(as_role)
                 caller = Caller(
                     HELDOUT_CALLER_ID,
-                    role or staff.get("role", "teller"),
+                    as_role,
                     "staff",
-                    {"branch": staff.get("branch", "")},
+                    attributes,
+                    packs={home: PackRole(as_role, attributes)}
+                    if home and len(runtime.deployment.packs) > 1
+                    else {},
                 )
                 for attempt in range(1, repeat + 1):
                     transcript = await replay(

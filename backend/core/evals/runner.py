@@ -2,7 +2,9 @@
 
 Run against the fake system adapters and the real model, so a change of model or prompt can be
 compared with the last run. Each question is asked in a new conversation, as the role it names,
-with no feature picked, so routing is part of what is measured. A follow-up question's earlier
+with no feature picked, so routing is part of what is measured. With several packs, the
+question's role is its pack's, and the caller also has the first role of every other pack (as
+staff do who use both): routing is measured across all the packs. A follow-up question's earlier
 turns (`before`) are asked first in the same conversation, and only its own answer is scored; a
 question with `prefer` is asked with that quick action chosen.
 """
@@ -14,8 +16,9 @@ from typing import TYPE_CHECKING
 from core.errors import PolicyDenied
 from core.evals.scoring import EvalQuestion, EvalReport, QuestionResult, score
 from core.events import Completed, Failed, FeatureSelected, ToolFinished, ToolStarted
+from core.packs.deployment import Deployment
 from core.packs.loader import Pack
-from core.types import Caller
+from core.types import Caller, PackRole
 
 if TYPE_CHECKING:
     from core.orchestrator.orchestrator import Orchestrator
@@ -24,7 +27,7 @@ EVAL_CALLER_ID = "eval"
 
 
 async def run(
-    pack: Pack,
+    pack: Pack | Deployment,
     orchestrator: "Orchestrator",
     only: set[str] | None = None,
     progress: Callable[[QuestionResult], None] | None = None,
@@ -33,12 +36,17 @@ async def run(
     """Ask every eval question (or those whose id or feature is in `only`) `repeat` times and
     score each answer. The model's answers vary between runs, so one pass can be luck."""
     report = EvalReport(model=getattr(orchestrator.model, "model", ""))
+    others = (
+        {p.manifest.name: p.manifest.roles[0] for p in pack.packs if p.manifest.roles}
+        if isinstance(pack, Deployment) and len(pack.packs) > 1
+        else {}
+    )
     for data in pack.eval_questions:
         question = EvalQuestion.from_dict(data)
         if only and question.id not in only and question.feature not in only:
             continue
         for attempt in range(1, repeat + 1):
-            result = score(await ask(orchestrator, question))
+            result = score(await ask(orchestrator, question, others))
             result.attempt = attempt
             report.add(result)
             if progress:
@@ -46,8 +54,15 @@ async def run(
     return report
 
 
-async def ask(orchestrator: "Orchestrator", question: EvalQuestion) -> QuestionResult:
+async def ask(
+    orchestrator: "Orchestrator", question: EvalQuestion, others: dict[str, str] | None = None
+) -> QuestionResult:
+    """`others`: with several packs, the caller's role in each other pack (pack -> role)."""
     caller = Caller(EVAL_CALLER_ID, question.role, "staff", question.attributes)
+    if question.pack and others:
+        packs = {name: PackRole(role) for name, role in others.items()}
+        packs[question.pack] = PackRole(question.role, dict(question.attributes))
+        caller = Caller(EVAL_CALLER_ID, question.role, "staff", question.attributes, packs=packs)
     conversation_id = await orchestrator.conversations.create(caller)
     result = QuestionResult(question)
     feature_tools: set[str] = set()

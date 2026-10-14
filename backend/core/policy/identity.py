@@ -1,6 +1,7 @@
 """Signs and verifies the caller token sent with every tool call.
 
-The platform signs who the caller is (HMAC over JSON, short expiry). Each MCP server verifies
+The platform signs who the caller is (HMAC over JSON, short expiry): as the pack whose tool is
+called sees them (`Caller.in_pack`), with that pack's name. Each MCP server verifies
 the token before running a tool, so no tool trusts an identity it cannot check.
 
 Token format: `<base64url(json payload)>.<base64url(hmac-sha256 of the payload part)>`.
@@ -37,6 +38,7 @@ def sign_caller(caller: Caller, secret: str, ttl: int, now: float | None = None)
         "role": caller.role,
         "audience": caller.audience,
         "attributes": caller.attributes,
+        "pack": caller.pack,
         "exp": int(issued + ttl),
     }
     payload = _b64encode(json.dumps(body, separators=(",", ":"), sort_keys=True).encode())
@@ -58,6 +60,7 @@ def verify_caller(token: str, secret: str, now: float | None = None) -> Caller:
             role=str(body["role"]),
             audience=str(body["audience"]),
             attributes=dict(body.get("attributes") or {}),
+            pack=str(body.get("pack") or ""),
         )
     except (ValueError, KeyError, TypeError) as exc:
         raise PolicyDenied("malformed caller token") from exc

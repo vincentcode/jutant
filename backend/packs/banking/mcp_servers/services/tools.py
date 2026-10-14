@@ -10,7 +10,13 @@ import re
 from core.policy.engine import PolicyEngine
 from core.types import Caller, Citation
 from mcp_servers.common.guard import GuardedServer, ToolOutput
-from packs.banking.adapters.base import CoreBankingClient, ServiceCatalogClient
+from packs.banking.adapters.base import (
+    CardsClient,
+    CoreBankingClient,
+    CustomerRecordsClient,
+    LendingClient,
+    ServiceCatalogClient,
+)
 from packs.banking.mcp_servers.services.aggregators import customer_summary
 
 
@@ -19,10 +25,20 @@ def create_server(
     catalog: ServiceCatalogClient,
     engine: PolicyEngine,
     secret: str,
+    *,
+    customers: CustomerRecordsClient | None = None,
+    lending: LendingClient | None = None,
+    cards: CardsClient | None = None,
 ) -> GuardedServer:
+    """`customers`, `lending` and `cards`, where the bank's systems offer them, add the
+    customer's KYC, loans, deposits and cards to the summary."""
     server = GuardedServer("services", engine, secret)
 
-    @server.tool("search_products", "Find bank products by name or code. Returns codes and names.")
+    @server.tool(
+        "search_products",
+        "Find bank products by name or code; an empty query lists every product. Returns codes "
+        "and names.",
+    )
     async def search_products(caller: Caller, query: str) -> ToolOutput:
         products = await catalog.search_products(query.strip())
         return ToolOutput(
@@ -54,11 +70,14 @@ def create_server(
 
     @server.tool(
         "customer_summary",
-        "One-screen summary of a customer: accounts, balances, recent activity, open requests.",
+        "One-screen summary of a customer: accounts, balances, recent activity, open requests, "
+        "KYC, loans, deposits, cards, and what needs attention.",
     )
     async def summary(caller: Caller, customer_number: str) -> ToolOutput:
         number = customer_number.strip().upper()
-        data = await customer_summary(banking, catalog, number)
+        data = await customer_summary(
+            banking, catalog, number, customers=customers, lending=lending, cards=cards
+        )
         return ToolOutput(
             data=data,
             citations=(Citation("record", "Customer", number),),

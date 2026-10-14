@@ -113,6 +113,7 @@ describe("SettingsPanel", () => {
       role: "customer_service",
       display_name: "Ama Mensah",
       attributes: { branch: "ACC-01" },
+      packs: {},
     };
     render(
       <SettingsPanel

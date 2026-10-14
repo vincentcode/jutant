@@ -342,3 +342,109 @@
   attributes: {branch: ACC-01}
   question: "Hi! What can you help me with?"
   expect_absent: ["I could not find a source"]
+
+# --- core banking services: account status and services, loans and deposits, cards ---------
+
+- id: q38
+  feature: account_services
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "Why can't the customer take money out of account 0011223344?"
+  expect_tool: accounts.get_status
+  expect_contains: ["2220.75", "lien"]
+  expect_citation: true
+
+- id: q39
+  feature: account_services
+  role: customer_service
+  attributes: {branch: ACC-01}
+  question: "Why did the rent standing order on account 0011223344 fail this month?"
+  expect_tool: accounts.list_standing_orders
+  expect_contains: ["insufficient"]
+  expect_citation: true
+
+- id: q40
+  feature: account_services
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "Who has to sign for withdrawals on account 0011223355?"
+  expect_tool: accounts.get_mandate
+  expect_contains: ["Yaw Mensah"]
+  expect_citation: true
+
+- id: q41
+  feature: account_services
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "Why was cheque 000102 on account 0011223344 returned?"
+  expect_tool: accounts.get_cheque
+  expect_contains: ["insufficient funds"]
+  expect_citation: true
+
+- id: q42
+  feature: account_services
+  role: customer_service
+  attributes: {branch: ACC-01}
+  question: "The customer is asking about a 50 cedi charge on account 0011223344. What is it?"
+  expect_tool: accounts.list_charges
+  expect_contains: ["returned cheque"]
+  expect_citation: true
+
+- id: q43
+  feature: account_services
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "Is there a hold on account 0099887766?"
+  expect_denied: true  # another branch's account
+
+- id: q44
+  feature: loans_and_deposits
+  role: credit_officer
+  attributes: {branch: KSI-02}
+  question: "How far behind is loan LN-1002, and by how much?"
+  expect_tool: lending.get_loan
+  expect_contains: ["4230.00", "47"]
+  expect_citation: true
+
+- id: q45
+  feature: loans_and_deposits
+  role: customer_service
+  attributes: {branch: ACC-01}
+  question: "What will fixed deposit FD-2001 pay out at maturity?"
+  expect_tool: lending.get_deposit
+  expect_contains: ["10900.00"]
+  expect_citation: true
+
+- id: q46
+  feature: loans_and_deposits
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "Is loan LN-1001 up to date?"
+  expect_denied: true  # tellers may not see loans
+
+- id: q47
+  feature: card_lookup
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "The customer says card CRD-3001 was declined online. Why?"
+  expect_tool: cards.get_card
+  expect_contains: ["57", "international"]
+  expect_citation: true
+
+- id: q48
+  feature: card_lookup
+  role: teller
+  attributes: {branch: KSI-02}
+  question: "Why is card CRD-3002 not working?"
+  expect_tool: cards.get_card
+  expect_contains: ["PIN"]
+  expect_citation: true
+
+- id: q49
+  feature: customer_360
+  role: customer_service
+  attributes: {branch: KSI-02}
+  question: "Does anything on customer C1002's file need my attention?"
+  expect_tool: services.customer_summary
+  expect_contains: ["KYC", "LN-1002"]
+  expect_citation: true

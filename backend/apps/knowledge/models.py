@@ -20,6 +20,8 @@ class Document(models.Model):
     classification = models.CharField(
         max_length=64, blank=True
     )  # a pack label; blank = unsearchable
+    # The pack whose questions find it; blank = every pack's (shared by all).
+    pack = models.CharField(max_length=64, blank=True, db_index=True)
     version = models.CharField(max_length=32, blank=True)
     effective_date = models.DateField(null=True, blank=True)
     checksum = models.CharField(max_length=64, db_index=True)

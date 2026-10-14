@@ -2,7 +2,9 @@
 
 Used to pick a feature for a question and a playbook for a problem. The model is asked for a
 single id; its reply is accepted only if it is exactly one of the ids, give or take quotes,
-punctuation and case. A small model often adds words, so keyword scoring is the fallback.
+punctuation and case, or the option's place in the list ("2"): a small model often answers with
+the position of the option it means. It often adds words too, so keyword scoring is the
+fallback.
 """
 
 import re
@@ -43,13 +45,16 @@ def _stem(word: str) -> str:
 
 
 def parse_choice(reply: str | None, ids: Sequence[str]) -> str | None:
-    """The id the model replied with, or None if the reply is not exactly one of `ids`."""
+    """The id the model replied with, or None if the reply is not exactly one of `ids`, nor
+    the place of one in the list (1 for the first): an id wins over a place."""
     if not reply:
         return None
     cleaned = reply.strip().strip("`'\".:; ").lower()  # quotes and punctuation, in any order
     for option_id in ids:
         if cleaned == option_id.lower():
             return option_id
+    if cleaned.isdigit() and 1 <= int(cleaned) <= len(ids):
+        return ids[int(cleaned) - 1]
     return None
 
 
@@ -77,9 +82,16 @@ async def choose(
 
 
 async def ask_model(
-    model: ModelProvider, instruction: str, text: str, options: Sequence[Option]
+    model: ModelProvider,
+    instruction: str,
+    text: str,
+    options: Sequence[Option],
+    *,
+    unavailable_raises: bool = False,
 ) -> str | None:
-    """The option the model picks, or None if it is unavailable or its reply is not an id."""
+    """The option the model picks, or None if its reply is not an id, or if it is unavailable
+    (unless `unavailable_raises`: a caller with no fallback says the model is unavailable
+    rather than treating it as "could not tell")."""
     listing = "\n".join(f"{o.id}: {o.description}" for o in options)
     messages = [
         Message("system", f"{instruction}\n\n{listing}\n\nReply with the id only."),
@@ -88,5 +100,7 @@ async def ask_model(
     try:
         reply = await model.chat(messages, [])
     except ModelUnavailable:
+        if unavailable_raises:
+            raise
         return None
     return parse_choice(reply.text, [o.id for o in options])

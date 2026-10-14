@@ -32,6 +32,7 @@ INSTALLED_APPS = [
     "apps.knowledge",
     "apps.playbooks",
     "apps.audit",
+    "apps.actions",
     "apps.evals",
     "ingestion",
 ]
@@ -85,7 +86,16 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # --- Jutant ------------------------------------------------------------------
 
-JUTANT_PACK_PATH = BASE_DIR / env("JUTANT_PACK_PATH", "packs/banking")
+# The packs this deployment runs as one assistant, comma-separated, the first's conversation
+# kept. JUTANT_PACK_PATH (one pack) is still read when JUTANT_PACKS is not set.
+JUTANT_PACKS = [
+    BASE_DIR / p.strip()
+    for p in env("JUTANT_PACKS", env("JUTANT_PACK_PATH", "packs/banking")).split(",")
+    if p.strip()
+]
+JUTANT_PACK_PATH = JUTANT_PACKS[0]
+# The assistant's name, as staff see it; empty: the first pack's own name.
+JUTANT_ASSISTANT_NAME = env("JUTANT_ASSISTANT_NAME", "")
 JUTANT_CALLER_SECRET = env("JUTANT_CALLER_SECRET", "change-me")
 JUTANT_SESSION_SECRET = env("JUTANT_SESSION_SECRET", "change-me-too")
 JUTANT_SESSION_TTL_MIN = int(env("JUTANT_SESSION_TTL_MIN", "480"))
@@ -155,5 +165,9 @@ JUTANT_MCP_URLS = {
     "documents": env("JUTANT_MCP_DOCUMENTS_URL", "http://localhost:8101/mcp"),
     "transactions": env("JUTANT_MCP_TRANSACTIONS_URL", "http://localhost:8102/mcp"),
     "services": env("JUTANT_MCP_SERVICES_URL", "http://localhost:8103/mcp"),
+    "accounts": env("JUTANT_MCP_ACCOUNTS_URL", "http://localhost:8104/mcp"),
+    "lending": env("JUTANT_MCP_LENDING_URL", "http://localhost:8105/mcp"),
+    "cards": env("JUTANT_MCP_CARDS_URL", "http://localhost:8106/mcp"),
+    "hr": env("JUTANT_MCP_HR_URL", "http://localhost:8107/mcp"),
 }
 JUTANT_BANKING_ADAPTERS = env("JUTANT_BANKING_ADAPTERS", "fake")

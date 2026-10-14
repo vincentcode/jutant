@@ -45,7 +45,7 @@ class Command(BaseCommand):
         runtime = build_runtime()
         await runtime.start()
         try:
-            return await run(runtime.pack, runtime.orchestrator, only, self._progress, repeat)
+            return await run(runtime.deployment, runtime.orchestrator, only, self._progress, repeat)
         finally:
             await runtime.stop()
 

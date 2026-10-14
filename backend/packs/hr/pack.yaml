@@ -1,0 +1,259 @@
+name: hr
+display_name: HR Assistant
+# Employees asking about their own HR matters. Managers and HR staff come later, with the
+# features (and access rules) that let them see others' records.
+roles: [employee]
+audiences: [staff]
+default_feature: conversation
+policy: packs.hr.policy.rules
+
+mcp_servers:
+  - platform: documents
+  - pack: hr
+
+home:
+  cards:
+    - title: My leave
+      description: How many days you have left, what you have booked, public holidays.
+      feature: my_leave
+      icon: calendar-days
+      label: Leave
+    - title: Request leave
+      description: Ask for days off. You check the request before it is sent.
+      feature: leave_request
+      icon: calendar-plus
+      label: Leave
+    - title: My HR requests
+      description: Where your requests stand, and adding to one.
+      feature: my_requests
+      icon: inbox
+      label: Requests
+    - title: Ask HR for something
+      description: A payroll problem, a letter, a benefits question.
+      feature: new_help_request
+      icon: life-buoy
+      label: Requests
+    - title: HR policies
+      description: Leave, working hours, benefits and other policies.
+      feature: hr_policy_qa
+      icon: book-open
+      label: Knowledge
+    - title: Talk to HR
+      description: Privately, about something sensitive, or about anything else.
+      feature: talk_to_hr
+      icon: shield
+      label: People
+
+tool_labels:
+  documents.search: HR policies
+  documents.get: the policy
+  hr.my_profile: your HR record
+  hr.leave_balance: your leave
+  hr.leave_types: the kinds of leave
+  hr.holidays: public holidays
+  hr.my_requests: your requests
+  hr.get_request: the request
+  hr.propose_leave_request: your leave request
+  hr.propose_help_request: your HR request
+  hr.propose_comment: your note on the request
+  hr.propose_contact: your request to talk to HR
+
+classifications:
+  - {label: public, roles: all}
+  - {label: internal, roles: [employee]}
+
+# Requests sent only once the employee presses Send on the card (`core.actions`). The model may
+# call a `propose` tool; no feature lists a `perform` tool.
+actions:
+  - {id: leave_request, title: Leave request, propose: hr.propose_leave_request, perform: hr.submit_leave_request, icon: calendar-plus}
+  - {id: help_request, title: HR request, propose: hr.propose_help_request, perform: hr.submit_help_request, icon: life-buoy}
+  - {id: request_comment, title: Note on a request, propose: hr.propose_comment, perform: hr.submit_comment, icon: message-square}
+  - {id: contact_hr, title: Talk to HR, propose: hr.propose_contact, perform: hr.submit_contact, icon: shield}
+
+features:
+  - id: conversation
+    template: conversation
+    title: General conversation
+    description: "Greetings, thanks, what the assistant can help with, or a request too unclear to act on."
+    prompt: prompts/conversation.md
+    route:
+      examples:
+        - "Hello"
+        - "Thanks, that's everything"
+        - "What can you help me with?"
+
+  - id: hr_policy_qa
+    template: document_qa
+    title: HR policies
+    suggestions: ["How many days of compassionate leave can I take?"]
+    description: "What the HR policies say: kinds of leave and their rules, working hours, overtime, benefits, conduct."
+    prompt: prompts/hr_policy_qa.md
+    tools: [documents.search]
+    route:
+      examples:
+        - "What does the policy say about working from home?"
+        - "Is overtime paid or given as time off?"
+        - "Who is eligible for the medical benefit?"
+
+  - id: my_leave
+    template: record_lookup
+    title: My leave
+    suggestions: ["How many days of annual leave do I have left?"]
+    description: "Your own leave: days left, taken and booked, leave you have asked for, the kinds of leave, and public holidays."
+    prompt: prompts/my_leave.md
+    tools: [hr.leave_balance, hr.leave_types, hr.holidays]
+    route:
+      examples:
+        - "What is my leave balance?"
+        - "How much sick leave have I used this year?"
+        - "When is the next public holiday?"
+        - "Has my leave been approved?"
+    # One of the records, the one the question is about; made in code, for the caller.
+    prefetch:
+      - tool: hr.leave_balance
+        when: "how much leave they have left, have taken or have booked, or leave they asked for"
+        arguments: {}
+      - tool: hr.leave_types
+        when: "the kinds of leave, their notice or what must be given with them"
+        arguments: {}
+      - tool: hr.holidays
+        when: "public holidays or days the office is closed"
+        arguments: {}
+
+  - id: leave_request
+    template: record_lookup
+    title: Request leave
+    description: "Asking for days off: annual, sick, compassionate, study, maternity, paternity or unpaid leave on given dates."
+    prompt: prompts/leave_request.md
+    tools: [hr.propose_leave_request]
+    details:
+      leave_type:
+        label: the kind of leave
+        ask: "Which kind of leave?"
+        choose:
+          annual: Annual leave
+          sick: Sick leave
+          compassionate: Compassionate leave
+          study: Study leave
+          maternity: Maternity leave
+          paternity: Paternity leave
+          unpaid: Unpaid leave
+        words:
+          annual: [vacation, days off, time off]
+          sick: [ill, unwell]
+          compassionate: [bereavement, funeral]
+      dates:
+        label: the days you want off
+        ask: "Which days? For example 10 to 14 November, or 12 November for one day."
+        period: true
+        nearest: true
+    needs:
+      first: [leave_type, dates]
+    route:
+      patterns: ['(?i)\b(book|request|apply for|take)\b.*\b(leave|days? off|time off|vacation)\b']
+      examples:
+        - "I'd like to take next week off"
+        - "Put in a leave request for me"
+        - "I was sick on Monday and Tuesday, record it"
+    # Made in code once the kind and the days are known: the card is the answer.
+    prefetch:
+      - tool: hr.propose_leave_request
+        arguments: {leave_type: {detail: leave_type}, dates: {detail: dates}}
+
+  - id: my_requests
+    template: record_lookup
+    title: My HR requests
+    suggestions: ["What is happening with my HR requests?"]
+    description: "Your HR requests and leave requests: where each stands, the latest update, and adding something to one."
+    prompt: prompts/my_requests.md
+    tools: [hr.my_requests, hr.get_request, hr.propose_comment]
+    route:
+      patterns: ['(?i)\bHR-\d{4}-\d{5}\b']
+      examples:
+        - "Has anyone looked at my request yet?"
+        - "Add a note to my payroll request"
+        - "Which of my requests are still open?"
+    prefetch:
+      - tool: hr.get_request
+        arguments: {reference: {entity: hr_request}}
+      - tool: hr.my_requests
+        when: "their requests in general, or which are open"
+        arguments: {}
+
+  - id: new_help_request
+    template: record_lookup
+    title: Ask HR for something
+    description: "Raising a new request with HR: a pay or payslip problem, a letter or document, a benefits or policy question for HR to answer."
+    prompt: prompts/new_help_request.md
+    tools: [hr.propose_help_request]
+    details:
+      category:
+        label: what the request is about
+        ask: "What is the request about?"
+        choose:
+          payroll: Pay and payslips
+          leave: Leave
+          benefits: Benefits
+          documents: Letters and documents
+          policy: A question about a policy
+          other: Something else
+        words:
+          payroll: [salary, pay, payslip, overtime, allowance, deduction, tax]
+          documents: [letter, certificate, confirmation of employment, reference]
+          benefits: [medical, insurance, pension, provident fund]
+    needs:
+      first: [category]
+    route:
+      examples:
+        - "My overtime payment is missing"
+        - "I need a confirmation of employment letter for my landlord"
+        - "There's a wrong deduction on my payslip"
+        - "Raise a ticket with HR"
+    prefetch:
+      - tool: hr.propose_help_request
+        arguments: {category: {detail: category}, description: {question: true}}
+
+  - id: my_profile
+    template: record_lookup
+    title: My HR record
+    description: "Your own HR record: job title, department, office, manager, employment type and start date."
+    prompt: prompts/my_profile.md
+    tools: [hr.my_profile]
+    route:
+      examples:
+        - "Who is my line manager?"
+        - "What does HR have as my start date?"
+        - "Which department am I in?"
+    prefetch:
+      - tool: hr.my_profile
+        arguments: {}
+
+  - id: talk_to_hr
+    template: record_lookup
+    title: Talk to HR
+    description: "Talking to a person in HR: privately about something sensitive (harassment, bullying, a grievance, misconduct), or about anything the assistant cannot help with."
+    prompt: prompts/talk_to_hr.md
+    tools: [hr.propose_contact]
+    details:
+      kind:
+        label: whether it is sensitive
+        ask: "Is it something sensitive, which HR will keep confidential?"
+        choose:
+          private: Talk privately about something sensitive
+          general: Talk to someone in HR
+        words:
+          private: [confidential, privately, harassment, harassed, bullying, bullied, grievance, misconduct, discrimination, whistleblowing]
+    needs:
+      first: [kind]
+    route:
+      patterns: ['(?i)\b(harass\w*|bull(y|ied|ying)|grievance|discriminat\w*|whistle\s*blow\w*|misconduct)\b']
+      examples:
+        - "I need to speak to someone in HR confidentially"
+        - "Can a person from HR call me?"
+        - "I want to talk to a human"
+    prefetch:
+      - tool: hr.propose_contact
+        arguments: {kind: {detail: kind}}
+
+entities:
+  hr_request: {pattern: '(?i)\b(HR-\d{4}-\d{5})\b', words: [request, ticket]}

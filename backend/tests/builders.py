@@ -4,6 +4,8 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
+from core.actions.service import ActionService
+from core.actions.types import Action
 from core.events import Completed, Event, Failed
 from core.features.registry import FeatureRegistry
 from core.features.router import FeatureRouter
@@ -23,7 +25,12 @@ from core.types import (
 )
 from providers.llm.fake import FakeModel
 from providers.mcp.fake import FakeToolClient
-from tests.fakes import InMemoryAudit, InMemoryConversationStore, InMemoryPlaybookStore
+from tests.fakes import (
+    InMemoryActionStore,
+    InMemoryAudit,
+    InMemoryConversationStore,
+    InMemoryPlaybookStore,
+)
 
 QUERY_SCHEMA = {
     "type": "object",
@@ -133,6 +140,8 @@ class Rig:
     playbooks: InMemoryPlaybookStore
     audit: InMemoryAudit
     specs: list[ToolSpec] = field(default_factory=list)
+    actions: ActionService | None = None
+    action_store: InMemoryActionStore | None = None
 
 
 async def make_rig(
@@ -146,6 +155,7 @@ async def make_rig(
     entity_types: tuple[EntityType, ...] = (),
     default: str = "policy_qa",
     turn_mode: TurnMode = "route",
+    actions: tuple[Action, ...] = (),
 ) -> Rig:
     model = model or FakeModel()
     tools = FakeToolClient(
@@ -157,6 +167,12 @@ async def make_rig(
     audit = InMemoryAudit()
     registry = FeatureRegistry(features)
     gateway = ToolGateway(tools, ToolCatalog(tools), audit)
+    action_store = InMemoryActionStore() if actions else None
+    service = (
+        ActionService(actions, action_store, tools, conversations, audit)
+        if action_store is not None
+        else None
+    )
     orchestrator = Orchestrator(
         model=model,
         tools=tools,
@@ -171,9 +187,19 @@ async def make_rig(
         extraction_schemas=extraction_schemas,
         entity_types=entity_types,
         turn_mode=turn_mode,
+        actions=service,
     )
     await orchestrator.load_tools()
-    return Rig(orchestrator, model, tools, conversations, store, audit)
+    return Rig(
+        orchestrator,
+        model,
+        tools,
+        conversations,
+        store,
+        audit,
+        actions=service,
+        action_store=action_store,
+    )
 
 
 async def collect_events(events: AsyncIterator[Event]) -> list[Event]:

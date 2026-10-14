@@ -132,7 +132,7 @@ async def test_transaction_lookup_explains_a_failed_transfer() -> None:
         await client.login("ama")
         events = await client.ask(
             await client.conversation(),
-            text="Why did TX-0002 fail?",
+            text="Why did branch transfer TX-0002 fail?",
             feature_id="transaction_lookup",
         )
     assert answer(events)["citations"] == [
@@ -146,7 +146,7 @@ async def test_transaction_lookup_refuses_another_branch() -> None:
         await client.login("kojo")
         events = await client.ask(
             await client.conversation(),
-            text="Activity on 0011223344",
+            text="Branch activity on account 0011223344",
             feature_id="transaction_lookup",
         )
         assert client.model.calls == []
@@ -178,7 +178,7 @@ async def test_code_explainer_looks_up_the_code() -> None:
 async def test_form_guidance_lists_what_a_request_needs() -> None:
     await make_staff("efua", role="customer_service")
     turn = [
-        calls("services.get_requirements", request_type="joint account opening"),
+        ModelReply("joint_account_opening"),  # the request type, picked from the pack's list
         ModelReply("- Account opening form\n- Joint mandate form\n- All holders sign"),
     ]
     async with api(*turn) as client:
@@ -186,6 +186,7 @@ async def test_form_guidance_lists_what_a_request_needs() -> None:
         events = await client.ask(
             await client.conversation(), text="Joint account opening?", feature_id="form_guidance"
         )
+    assert "services.get_requirements" in tools_used(events)  # fetched in code
     assert answer(events)["citations"] == [
         {"kind": "record", "title": "Requirements", "locator": "joint_account_opening"}
     ]
@@ -198,7 +199,7 @@ async def test_troubleshooting_walks_a_playbook_to_the_end() -> None:
         await client.login("ama")
         conversation_id = await client.conversation()
         steps = []
-        for text in ("Card is blocked", "done", "expired", "done"):
+        for text in ("Card is blocked", "done", "CRD-3001", "expired", "done"):
             # After the first, answers clicked on the step card: not read by the model.
             reply_as = None if text == "Card is blocked" else "answer"
             events = await client.ask(
@@ -207,7 +208,8 @@ async def test_troubleshooting_walks_a_playbook_to_the_end() -> None:
             steps += [data["step"]["order"] for name, data in events if name == "playbook_step"]
         last = answer(events)
 
-    assert steps == [1, 2, 5, 7]  # expired -> order a replacement -> close
+    # the card looked up at step 2, then expired -> order a replacement -> close
+    assert steps == [1, 2, 3, 6, 8]
     assert last["text"] == "Procedure complete."
 
 
@@ -252,13 +254,20 @@ async def test_customer_360_for_customer_service_with_figures_from_code() -> Non
 
 async def test_a_greeting_is_talked_to_not_searched() -> None:
     await make_staff("ama")
-    async with api(ModelReply("conversation"), ModelReply("Hello! What do you need?")) as client:
+    replies = [
+        ModelReply("conversation"),  # routing
+        ModelReply("Hello! What do you need?"),
+        ModelReply("greeting"),  # not thanking: the kinds of help are offered
+    ]
+    async with api(*replies) as client:
         await client.login("ama")
         conversation_id = await client.conversation()
         events = await client.ask(conversation_id, text="Good morning")
     assert tools_used(events) == []
     assert answer(events)["text"] == "Hello! What do you need?"  # not "no source found"
     assert answer(events)["feature_id"] == "conversation"
+    [offered] = [data for name, data in events if name == "clarify"]
+    assert offered["reason"] == "talk" and offered["choices"]
 
 
 async def test_the_conversation_hands_a_request_to_a_feature() -> None:
@@ -269,7 +278,8 @@ async def test_the_conversation_hands_a_request_to_a_feature() -> None:
         conversation_id = await client.conversation()
         events = await client.ask(conversation_id, text="Help me with a customer's payment")
     assert answer(events)["feature_id"] == "transaction_lookup"
-    assert answer(events)["text"].startswith("Which transfer or account?")  # its ask_for
+    # what it needs first, asked in code: the channel (`needs`)
+    assert answer(events)["text"].startswith("Which channel was the transaction made on?")
 
 
 async def test_every_banking_feature_is_covered_here() -> None:
@@ -287,6 +297,9 @@ async def test_every_banking_feature_is_covered_here() -> None:
         "document_summary_extraction",
         "customer_360",
         "conversation",
+        "account_services",  # these three: tests/integration/test_core_services.py
+        "loans_and_deposits",
+        "card_lookup",
     }
     assert {f.id for f in load_pack(settings.JUTANT_PACK_PATH).features} == covered
 

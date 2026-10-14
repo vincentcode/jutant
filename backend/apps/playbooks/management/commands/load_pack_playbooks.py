@@ -22,8 +22,8 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options) -> None:
-        pack = load_pack(settings.JUTANT_PACK_PATH)
-        for definition in pack.playbooks:
+        packs = [load_pack(path) for path in settings.JUTANT_PACKS]
+        for definition in (pb for pack in packs for pb in pack.playbooks):
             _, written = services.upsert_playbook(definition=definition, replace=options["replace"])
             state = "loaded" if written else "skipped (exists; use --replace)"
             self.stdout.write(f"{definition.id}: {state}")

@@ -17,7 +17,12 @@ class DjangoDocumentStore:
         self.query_prefix = query_prefix  # the embedding model's prefix for queries
 
     async def search(
-        self, query: str, classifications: list[str], limit: int, doc_type: str | None = None
+        self,
+        query: str,
+        classifications: list[str],
+        limit: int,
+        doc_type: str | None = None,
+        pack: str = "",
     ) -> list[DocumentHit]:
         embedding = (await self.model.embed([self.query_prefix + query]))[0] if self.model else None
         results = await sync_to_async(selectors.search)(
@@ -26,6 +31,7 @@ class DjangoDocumentStore:
             classifications=classifications,
             limit=limit,
             doc_type=doc_type,
+            pack=pack,
         )
         return [
             DocumentHit(
@@ -39,10 +45,12 @@ class DjangoDocumentStore:
             for chunk, score in results
         ]
 
-    async def get_document(self, document_id: UUID, classifications: list[str]) -> DocumentText:
+    async def get_document(
+        self, document_id: UUID, classifications: list[str], pack: str = ""
+    ) -> DocumentText:
         """Raises KeyError if the document is missing or the caller may not read it."""
         document = await sync_to_async(selectors.get_document)(
-            document_id=document_id, classifications=classifications
+            document_id=document_id, classifications=classifications, pack=pack
         )
         if document is None:
             raise KeyError(str(document_id))
@@ -62,10 +70,10 @@ class DocumentLibrary:
     """The documents staff may browse in the Knowledge panel."""
 
     async def list(
-        self, classifications: list[str], search: str = "", doc_type: str = ""
+        self, classifications: list[str], search: str = "", doc_type: str = "", pack: str = ""
     ) -> list[LibraryEntry]:
         rows = await sync_to_async(selectors.library)(
-            classifications=classifications, search=search, doc_type=doc_type
+            classifications=classifications, search=search, doc_type=doc_type, pack=pack
         )
         return [
             LibraryEntry(r.id, r.title, r.doc_type, r.effective_date, r.created_at) for r in rows

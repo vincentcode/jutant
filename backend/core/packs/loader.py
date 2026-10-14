@@ -12,13 +12,16 @@ from typing import Any
 
 import yaml
 
+from core.actions.types import Action
 from core.features.templates import TEMPLATES
-from core.packs.manifest import PackManifest
+from core.packs.manifest import DetailDef, NeedsDef, PackManifest
 from core.policy.rules import FieldRule, Rule
 from core.types import (
     ArgumentSource,
+    Detail,
     EntityType,
     Feature,
+    Needs,
     Playbook,
     PlaybookStep,
     Prefetch,
@@ -38,6 +41,13 @@ class Pack:
     rules: tuple[Rule, ...]
     field_rules: tuple[FieldRule, ...]
     eval_questions: tuple[dict[str, Any], ...] = ()
+
+    @property
+    def actions(self) -> tuple[Action, ...]:
+        return tuple(
+            Action(a.id, a.title, a.propose, a.perform, tuple(a.roles), a.expires_s, a.icon)
+            for a in self.manifest.actions
+        )
 
     @property
     def entity_types(self) -> tuple[EntityType, ...]:
@@ -82,12 +92,23 @@ def load_pack(path: str | Path) -> Pack:
                 Prefetch(
                     p.tool,
                     {
-                        name: ArgumentSource(a.question, a.match, a.value, a.entity)
+                        name: ArgumentSource(
+                            a.question,
+                            a.match,
+                            a.value,
+                            a.entity,
+                            tuple(a.choose.items()),
+                            a.detail,
+                            a.optional,
+                        )
                         for name, a in p.arguments.items()
                     },
+                    p.when,
                 )
                 for p in f.prefetch
             ),
+            details=tuple(_detail(name, d) for name, d in f.details.items()),
+            needs=_needs(f.needs) if f.needs else None,
         )
         for f in manifest.features
     )
@@ -107,6 +128,30 @@ def load_pack(path: str | Path) -> Pack:
         rules=tuple(policy.RULES),
         field_rules=field_rules,
         eval_questions=tuple(questions or ()),
+    )
+
+
+def _detail(name: str, d: DetailDef) -> Detail:
+    return Detail(
+        name,
+        d.label,
+        d.entity,
+        tuple(d.choose.items()),
+        tuple((value, tuple(words)) for value, words in d.words.items()),
+        d.date,
+        d.ask,
+        d.title,
+        d.period,
+        d.nearest,
+    )
+
+
+def _needs(n: NeedsDef) -> Needs:
+    return Needs(
+        tuple(n.first),
+        tuple(tuple(s) for s in n.one_of),
+        n.by,
+        tuple((value, tuple(tuple(s) for s in sets)) for value, sets in n.one_of_by.items()),
     )
 
 

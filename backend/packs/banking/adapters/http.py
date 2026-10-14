@@ -150,6 +150,30 @@ def optional(value: Any) -> str | None:
     return None if value in (None, "") else str(value)
 
 
+def optional_money(value: Any) -> str | None:
+    return None if value in (None, "") else money(value)
+
+
+def optional_date(value: Any) -> str | None:
+    return None if value in (None, "") else iso_date(value)
+
+
+def one_of(value: Any, allowed: tuple[str, ...]) -> Any:
+    """`value` in lower case, if it is one of `allowed` (a record's status, say); else the
+    bank's interface is not what the client expects (ValueError, so `mapped` reports it)."""
+    text = str(value).lower()
+    if text not in allowed:
+        raise ValueError(f"{value!r} is not one of {', '.join(allowed)}")
+    return text
+
+
+def flag(value: Any) -> bool:
+    """A yes/no field, however the bank writes it: true, "Y", "yes", 1."""
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in ("true", "y", "yes", "1")
+
+
 def _auth(connection: Connection) -> tuple[dict[str, str], httpx.Auth | None]:
     if connection.auth == "bearer":
         return {"Authorization": f"Bearer {connection.token}"}, None

@@ -6,6 +6,8 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
+from core.actions.types import Proposal, ProposalStatus
+from core.errors import ActionUnavailable
 from core.events import PlaybookStepShown
 from core.playbooks.history import as_text
 from core.types import Caller, Citation, Message, Playbook, PlaybookRunState
@@ -99,3 +101,48 @@ class FixedClock:
 
     def now(self) -> datetime:
         return self.at
+
+
+class InMemoryActionStore:
+    def __init__(self) -> None:
+        self.proposals: dict[UUID, Proposal] = {}
+
+    async def create(self, proposal: Proposal) -> None:
+        self.proposals[proposal.id] = proposal
+
+    def _waiting(self, proposal_id: UUID, caller_id: str, now: datetime) -> Proposal:
+        found = self.proposals.get(proposal_id)
+        if found is None or found.caller_id != caller_id:
+            raise ActionUnavailable("not_found")
+        if found.status == "proposed" and found.expires_at <= now:
+            self.proposals[proposal_id] = replace(found, status="expired")
+            raise ActionUnavailable("expired")
+        if found.status != "proposed":
+            raise ActionUnavailable(found.status)
+        return found
+
+    async def claim(self, proposal_id: UUID, caller_id: str, now: datetime) -> Proposal:
+        claimed = replace(self._waiting(proposal_id, caller_id, now), status="sending")
+        self.proposals[proposal_id] = claimed
+        return claimed
+
+    async def finish(
+        self, proposal_id: UUID, status: ProposalStatus, reference: str = "", outcome: str = ""
+    ) -> Proposal:
+        done = replace(
+            self.proposals[proposal_id], status=status, reference=reference, outcome=outcome
+        )
+        self.proposals[proposal_id] = done
+        return done
+
+    async def cancel(self, proposal_id: UUID, caller_id: str, now: datetime) -> Proposal:
+        cancelled = replace(self._waiting(proposal_id, caller_id, now), status="cancelled")
+        self.proposals[proposal_id] = cancelled
+        return cancelled
+
+    async def for_conversation(self, conversation_id: UUID, caller_id: str) -> list[Proposal]:
+        return [
+            p
+            for p in self.proposals.values()
+            if p.conversation_id == conversation_id and p.caller_id == caller_id
+        ]

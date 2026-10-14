@@ -1,9 +1,9 @@
-"""The home screen: starting points and quick actions from the pack, for the caller's role."""
+"""The home screen: starting points from every pack, those the caller may use, mixed."""
 
 from fastapi import APIRouter, Depends
 
 from api.deps import get_caller, get_runtime
-from api.schemas import HomeCardOut, HomeOut, QuickActionOut
+from api.schemas import HomeCardOut, HomeOut
 from config.container import Runtime
 from core.types import Caller
 
@@ -14,8 +14,7 @@ router = APIRouter(prefix="/home", tags=["home"])
 async def home(
     caller: Caller = Depends(get_caller), runtime: Runtime = Depends(get_runtime)
 ) -> HomeOut:
-    allowed = {f.id for f in runtime.orchestrator.registry.for_role(caller.role)}
-    home = runtime.pack.manifest.home
+    allowed = {f.id for f in runtime.orchestrator.registry.for_caller(caller)}
     return HomeOut(
         cards=[
             HomeCardOut(
@@ -25,12 +24,7 @@ async def home(
                 icon=c.icon,
                 label=c.label,
             )
-            for c in home.cards
+            for c in runtime.deployment.home_cards
             if c.feature in allowed
-        ],
-        quick_actions=[
-            QuickActionOut(label=a.label, feature_id=a.feature)
-            for a in home.quick_actions
-            if a.feature in allowed
         ],
     )

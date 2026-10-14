@@ -11,6 +11,8 @@ from core.types import Caller
 
 ALL_STAFF = frozenset({"teller", "customer_service", "credit_officer", "branch_manager"})
 SUMMARY_ROLES = frozenset({"customer_service", "credit_officer", "branch_manager"})
+# Loans and deposits: not tellers, who serve over the counter and have no need of them.
+LENDING_ROLES = frozenset({"customer_service", "credit_officer", "branch_manager"})
 
 
 def any_staff(caller: Caller, arguments: dict[str, Any], record: dict[str, Any] | None) -> Decision:
@@ -40,6 +42,12 @@ def customer_summary(
     return same_branch(caller, arguments, record)
 
 
+def lending(caller: Caller, arguments: dict[str, Any], record: dict[str, Any] | None) -> Decision:
+    if caller.role not in LENDING_ROLES:
+        return Decision(False, "role")
+    return same_branch(caller, arguments, record)
+
+
 RULES: list[Rule] = [
     FunctionRule("documents.search", any_staff),
     FunctionRule("documents.get", any_staff),
@@ -49,4 +57,14 @@ RULES: list[Rule] = [
     FunctionRule("transactions.list", same_branch),
     FunctionRule("transactions.get_status", same_branch),
     FunctionRule("services.customer_summary", customer_summary),
+    FunctionRule("accounts.get_status", same_branch),
+    FunctionRule("accounts.get_mandate", same_branch),
+    FunctionRule("accounts.list_charges", same_branch),
+    FunctionRule("accounts.list_standing_orders", same_branch),
+    FunctionRule("accounts.get_cheque", same_branch),
+    FunctionRule("lending.list_facilities", lending),
+    FunctionRule("lending.get_loan", lending),
+    FunctionRule("lending.get_deposit", lending),
+    FunctionRule("cards.list_cards", same_branch),
+    FunctionRule("cards.get_card", same_branch),
 ]

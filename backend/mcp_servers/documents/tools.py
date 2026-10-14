@@ -3,15 +3,16 @@
 - `documents.search`: the sections that best match a question, each cited by title and section.
 - `documents.get`: one whole document, for summarising.
 
-Search is always limited to the classifications the caller's role may read; the labels come
-from the pack's manifest. A document the caller may not read behaves as if it did not exist.
+Search is always limited to the classifications the caller's role may read, and to the
+documents of the pack they act in and those every pack shares; the labels come from the pack's
+manifest. A document the caller may not read behaves as if it did not exist.
 """
 
 import math
 from collections.abc import Callable
 from uuid import UUID
 
-from core.policy.engine import PolicyEngine
+from core.policy.engine import PackPolicies, PolicyEngine
 from core.ports import DocumentStore
 from core.types import Caller, Citation
 from mcp_servers.common.guard import GuardedServer, ToolInputError, ToolOutput
@@ -26,11 +27,11 @@ WHOLE_DOCUMENT = "whole document"
 
 def create_server(
     store: DocumentStore,
-    engine: PolicyEngine,
+    engine: PolicyEngine | PackPolicies,
     secret: str,
-    readable: Callable[[str], list[str]],
+    readable: Callable[[Caller], list[str]],
 ) -> GuardedServer:
-    """`readable(role)` gives the document labels a role may read."""
+    """`readable(caller)` gives the document labels the caller may read, in their pack."""
     server = GuardedServer("documents", engine, secret)
 
     @server.tool(
@@ -42,7 +43,7 @@ def create_server(
         caller: Caller, query: str, doc_type: str | None = None, limit: int = 4
     ) -> ToolOutput:
         limit = max(MIN_RESULTS, min(limit, MAX_RESULTS))
-        hits = await store.search(query, readable(caller.role), limit, doc_type)
+        hits = await store.search(query, readable(caller), limit, doc_type, pack=caller.pack)
         return ToolOutput(
             data=[
                 {
@@ -68,7 +69,7 @@ def create_server(
             uid = UUID(document_id)
         except ValueError:
             raise LookupError(document_id) from None
-        document = await store.get_document(uid, readable(caller.role))
+        document = await store.get_document(uid, readable(caller), pack=caller.pack)
         parts = max(1, math.ceil(len(document.text) / PART_CHARS))
         if not 1 <= part <= parts:
             raise ToolInputError(f"part must be between 1 and {parts}")

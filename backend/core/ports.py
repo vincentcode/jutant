@@ -20,6 +20,7 @@ from core.types import (
 )
 
 if TYPE_CHECKING:
+    from core.actions.types import Proposal, ProposalStatus
     from core.events import PlaybookStepShown
 
 AUDIT_EVENTS = (
@@ -35,6 +36,10 @@ AUDIT_EVENTS = (
     "feedback_given",
     "conversation_deleted",
     "turn_read",  # what a message did to the conversation's context, and what decided it
+    "action_proposed",
+    "action_confirmed",
+    "action_failed",
+    "action_cancelled",
 )
 
 
@@ -92,10 +97,19 @@ class PlaybookStore(Protocol):
 
 
 class DocumentStore(Protocol):
+    """`pack`: only that pack's documents and those every pack shares; "" for all."""
+
     async def search(
-        self, query: str, classifications: list[str], limit: int, doc_type: str | None = None
+        self,
+        query: str,
+        classifications: list[str],
+        limit: int,
+        doc_type: str | None = None,
+        pack: str = "",
     ) -> list[DocumentHit]: ...
-    async def get_document(self, document_id: UUID, classifications: list[str]) -> DocumentText: ...
+    async def get_document(
+        self, document_id: UUID, classifications: list[str], pack: str = ""
+    ) -> DocumentText: ...
 
 
 class AuditSink(Protocol):
@@ -108,3 +122,21 @@ class IdentityProvider(Protocol):
 
 class Clock(Protocol):
     def now(self) -> datetime: ...
+
+
+class ActionStore(Protocol):
+    """Proposed actions. `claim` and `cancel` change a proposal only if it belongs to the caller
+    and is still waiting, atomically: two clicks on Send confirm it once. Both raise
+    `ActionUnavailable` otherwise; a proposal past its time is marked expired first."""
+
+    async def create(self, proposal: "Proposal") -> None: ...
+    async def claim(self, proposal_id: UUID, caller_id: str, now: datetime) -> "Proposal": ...
+    async def finish(
+        self,
+        proposal_id: UUID,
+        status: "ProposalStatus",
+        reference: str = "",
+        outcome: str = "",
+    ) -> "Proposal": ...
+    async def cancel(self, proposal_id: UUID, caller_id: str, now: datetime) -> "Proposal": ...
+    async def for_conversation(self, conversation_id: UUID, caller_id: str) -> list["Proposal"]: ...

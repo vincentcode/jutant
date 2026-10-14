@@ -71,10 +71,54 @@ services:
       <<: *mcp-health
       test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 8103), 2)"]
 
+  mcp-accounts:
+    <<: *python
+    command: python -m packs.banking.mcp_servers.accounts.server
+    healthcheck:
+      <<: *mcp-health
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 8104), 2)"]
+
+  mcp-lending:
+    <<: *python
+    command: python -m packs.banking.mcp_servers.lending.server
+    healthcheck:
+      <<: *mcp-health
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 8105), 2)"]
+
+  mcp-cards:
+    <<: *python
+    command: python -m packs.banking.mcp_servers.cards.server
+    healthcheck:
+      <<: *mcp-health
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 8106), 2)"]
+
+  # The HR pack's server (packs/hr). It answers from the dummy HR system until
+  # JUTANT_HR_ADAPTERS=real points it at HR systems.
+  mcp-hr:
+    <<: *python
+    command: python -m packs.hr.mcp_servers.hr.server
+    healthcheck:
+      <<: *mcp-health
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 8107), 2)"]
+
+  # A stand-in for the HR systems, serving the dummy HR system over HTTP, to run the real HR
+  # clients (JUTANT_HR_ADAPTERS=real) before the HR systems are known. Point
+  # JUTANT_HR_RECORDS_URL, JUTANT_HR_LEAVE_URL and JUTANT_HR_HELPDESK_URL at
+  # http://mock-hr:8191. Start it with the `hr` profile.
+  mock-hr:
+    <<: *python
+    command: python -m packs.hr.mock_hr
+    profiles: [hr]
+    depends_on: {}
+    healthcheck:
+      <<: *mcp-health
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 8191), 2)"]
+
   # A stand-in for the bank's systems, serving the fake bank over HTTP, to run the real
   # clients (JUTANT_BANKING_ADAPTERS=real) before the bank is reachable. Start it with
   #   docker compose -f infra/docker-compose.yml --profile mock-bank up -d
-  # and point JUTANT_CORE_BANKING_URL and JUTANT_SERVICE_CATALOG_URL at http://mock-bank:8190.
+  # and point JUTANT_CORE_BANKING_URL, JUTANT_SERVICE_CATALOG_URL, JUTANT_LENDING_URL and
+  # JUTANT_CARDS_URL at http://mock-bank:8190.
   mock-bank:
     <<: *python
     command: python -m packs.banking.mock_bank
@@ -98,6 +142,10 @@ services:
       mcp-documents: {condition: service_healthy}
       mcp-transactions: {condition: service_healthy}
       mcp-services: {condition: service_healthy}
+      mcp-accounts: {condition: service_healthy}
+      mcp-lending: {condition: service_healthy}
+      mcp-cards: {condition: service_healthy}
+      mcp-hr: {condition: service_healthy}
       ollama: {condition: service_started, required: false}
     healthcheck:
       test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 8000), 2)"]
