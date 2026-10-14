@@ -194,6 +194,64 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/conversations/{conversation_id}/actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Proposals
+         * @description The requests proposed in the conversation, oldest first, each as its card now stands.
+         */
+        get: operations["proposals_api_conversations__conversation_id__actions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/conversations/{conversation_id}/actions/{proposal_id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm
+         * @description Send a proposed request, exactly as its card showed it. Only the person it was proposed
+         *     to may send it, once, before it expires; the model takes no part.
+         */
+        post: operations["confirm_api_conversations__conversation_id__actions__proposal_id__confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/conversations/{conversation_id}/actions/{proposal_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel */
+        post: operations["cancel_api_conversations__conversation_id__actions__proposal_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/features": {
         parameters: {
             query?: never;
@@ -422,6 +480,13 @@ export interface components {
              */
             comment: string;
         };
+        /** FieldOut */
+        FieldOut: {
+            /** Label */
+            label: string;
+            /** Value */
+            value: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -541,6 +606,48 @@ export interface components {
             step_title: string;
             /** Paused */
             paused: boolean;
+        };
+        /**
+         * ProposalOut
+         * @description A request the assistant proposed: the client shows it as a card to send, change or
+         *     cancel. What will be sent is shown in `fields`; the system's own arguments stay here.
+         */
+        ProposalOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Action Id */
+            action_id: string;
+            /** Title */
+            title: string;
+            /** Icon */
+            icon: string;
+            /** Summary */
+            summary: string;
+            /** Fields */
+            fields: components["schemas"]["FieldOut"][];
+            /** Notes */
+            notes: string[];
+            /** Warnings */
+            warnings: string[];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "proposed" | "sending" | "sent" | "failed" | "cancelled" | "expired";
+            /** Reference */
+            reference: string;
+            /** Outcome */
+            outcome: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Created At */
+            created_at?: string | null;
         };
         /**
          * StepOut
@@ -940,6 +1047,101 @@ export interface operations {
                 };
                 content: {
                     "text/event-stream": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    proposals_api_conversations__conversation_id__actions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProposalOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_api_conversations__conversation_id__actions__proposal_id__confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProposalOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_api_conversations__conversation_id__actions__proposal_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProposalOut"];
                 };
             };
             /** @description Validation Error */

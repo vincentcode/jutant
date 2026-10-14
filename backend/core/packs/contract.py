@@ -19,11 +19,15 @@
 - a feature's details name known entity types, its needs name its details (`by` one asked
   first, with values to pick from, and `one_of_by` only those values), and its prefetch calls
   use only its details;
-- every feature has at least one eval question.
+- every feature has at least one eval question;
+- every action's propose tool is listed by a feature and its perform tool by none (the model
+  never holds a tool that does anything), both are offered by a pack server, the perform tool
+  takes `request_id`, and its roles are the pack's.
 """
 
 import re
 
+from core.actions.service import REQUEST_ID
 from core.packs.loader import SYSTEM_PROMPT, Pack
 from core.packs.manifest import FeatureDef, PrefetchDef
 from core.playbooks.runner import PLACEHOLDER
@@ -106,6 +110,8 @@ def check(pack: Pack, tool_specs: list[ToolSpec]) -> list[str]:
         problems.extend(_branches_running_into_each_other(playbook))
         problems.extend(_lookup_problems(playbook, specs, playbook_tools))
 
+    problems.extend(_action_problems(pack, tools, specs, roles))
+
     if m.default_feature not in feature_ids:
         problems.append(f"default_feature {m.default_feature} is not a feature")
     if not _non_empty(pack, SYSTEM_PROMPT):
@@ -114,6 +120,34 @@ def check(pack: Pack, tool_specs: list[ToolSpec]) -> list[str]:
     asked = {q.get("feature") for q in pack.eval_questions}
     for feature_id in sorted(feature_ids - asked):
         problems.append(f"feature {feature_id} has no eval question")
+    return problems
+
+
+def _action_problems(
+    pack: Pack, tools: set[str], specs: dict[str, ToolSpec], roles: set[str]
+) -> list[str]:
+    problems: list[str] = []
+    listed = {t for f in pack.manifest.features for t in f.tools}
+    ids: set[str] = set()
+    for a in pack.manifest.actions:
+        where = f"action {a.id}"
+        if a.id in ids:
+            problems.append(f"{where}: declared twice")
+        ids.add(a.id)
+        for tool in (a.propose, a.perform):
+            if tool not in tools:
+                problems.append(f"{where}: tool {tool} is not offered by any pack server")
+        if a.propose not in listed:
+            problems.append(f"{where}: no feature lists its propose tool {a.propose}")
+        if a.perform in listed:
+            problems.append(f"{where}: a feature lists its perform tool {a.perform}")
+        perform = specs.get(a.perform)
+        if perform is not None and REQUEST_ID not in perform.input_schema.get("properties", {}):
+            problems.append(f"{where}: perform tool {a.perform} must take {REQUEST_ID}")
+        for role in sorted(set(a.roles) - roles):
+            problems.append(f"{where}: unknown role {role}")
+        if a.expires_s <= 0:
+            problems.append(f"{where}: expires_s must be positive")
     return problems
 
 

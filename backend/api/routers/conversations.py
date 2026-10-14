@@ -21,10 +21,13 @@ from api.schemas import (
     FeedbackOut,
     MessageOut,
     ProcedureOut,
+    ProposalOut,
+    proposal_out,
 )
 from api.sse import step_out
 from apps.conversation.adapters import Rating
 from config.container import Runtime
+from core.errors import ActionUnavailable
 from core.types import Caller
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
@@ -209,6 +212,77 @@ async def ask(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# --- requests to send, proposed by the assistant (`core.actions`) ---------------------------------
+
+UNAVAILABLE = {
+    "expired": "This request waited too long and was not sent. Ask again to make a new one.",
+    "sending": "This request is already being sent.",
+    "sent": "This request has already been sent.",
+    "failed": "This request could not be sent. Ask again to make a new one.",
+    "cancelled": "This request was cancelled.",
+}
+
+
+@router.get("/{conversation_id}/actions")
+async def proposals(
+    conversation_id: UUID,
+    caller: Caller = Depends(get_caller),
+    runtime: Runtime = Depends(get_runtime),
+) -> list[ProposalOut]:
+    """The requests proposed in the conversation, oldest first, each as its card now stands."""
+    await _owned(runtime, conversation_id, caller)
+    if runtime.actions is None:
+        return []
+    return [
+        proposal_out(p) for p in await runtime.actions.for_conversation(caller, conversation_id)
+    ]
+
+
+@router.post("/{conversation_id}/actions/{proposal_id}/confirm")
+async def confirm(
+    conversation_id: UUID,
+    proposal_id: UUID,
+    caller: Caller = Depends(get_caller),
+    runtime: Runtime = Depends(get_runtime),
+) -> ProposalOut:
+    """Send a proposed request, exactly as its card showed it. Only the person it was proposed
+    to may send it, once, before it expires; the model takes no part."""
+    return await _decide(conversation_id, proposal_id, caller, runtime, confirm=True)
+
+
+@router.post("/{conversation_id}/actions/{proposal_id}/cancel")
+async def cancel(
+    conversation_id: UUID,
+    proposal_id: UUID,
+    caller: Caller = Depends(get_caller),
+    runtime: Runtime = Depends(get_runtime),
+) -> ProposalOut:
+    return await _decide(conversation_id, proposal_id, caller, runtime, confirm=False)
+
+
+async def _decide(
+    conversation_id: UUID, proposal_id: UUID, caller: Caller, runtime: Runtime, confirm: bool
+) -> ProposalOut:
+    await _owned(runtime, conversation_id, caller)
+    if runtime.actions is None:
+        raise NOT_FOUND
+    mine = {p.id for p in await runtime.actions.for_conversation(caller, conversation_id)}
+    if proposal_id not in mine:
+        raise NOT_FOUND
+    try:
+        if confirm:
+            done = await runtime.actions.confirm(caller, proposal_id)
+        else:
+            done = await runtime.actions.cancel(caller, proposal_id)
+    except ActionUnavailable as exc:
+        if exc.reason == "not_found":
+            raise NOT_FOUND from None
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, UNAVAILABLE.get(exc.reason, "This request cannot change.")
+        ) from None
+    return proposal_out(done)
 
 
 async def _owned(runtime: Runtime, conversation_id: UUID, caller: Caller) -> None:

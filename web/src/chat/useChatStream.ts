@@ -3,7 +3,7 @@
 
 import { useCallback, useReducer, useRef } from 'react'
 import { ApiError } from '../api/client'
-import type { Choice, Citation, ShownStep, StreamEvent, ToolCall, ToolResult } from '../api/events'
+import type { Choice, Citation, Proposal, ShownStep, StreamEvent, ToolCall, ToolResult } from '../api/events'
 import { ask, type AskBody } from '../api/stream'
 
 export interface ToolActivityItem {
@@ -26,6 +26,7 @@ export interface ChatStreamState {
   tools: ToolActivityItem[]
   citations: Citation[]
   steps: ShownStep[]
+  proposals: Proposal[] // requests the turn proposed, to send from their cards
   failure?: string // the reason the turn failed (`denied`, `model_unavailable`...)
   error?: string // a message for failures outside the stream (connection, HTTP)
 }
@@ -43,6 +44,7 @@ export const initialStreamState: ChatStreamState = {
   tools: [],
   citations: [],
   steps: [],
+  proposals: [],
 }
 
 export function chatStreamReducer(state: ChatStreamState, action: ChatAction): ChatStreamState {
@@ -85,6 +87,8 @@ export function chatStreamReducer(state: ChatStreamState, action: ChatAction): C
       return { ...state, status: 'streaming', text: state.text + action.data.text }
     case 'playbook_step':
       return { ...state, steps: [...state.steps, action.data] }
+    case 'action_proposed':
+      return { ...state, proposals: [...state.proposals, action.data] }
     case 'completed':
       return { ...state, status: 'done', text: action.data.answer.text, citations: action.data.answer.citations }
     case 'failed':

@@ -1,5 +1,10 @@
 // Typed union of the server-sent events streamed by POST /api/conversations/{id}/ask.
 
+import type { components } from './schema'
+
+/** A request to send, proposed by the assistant: shown as a card. */
+export type Proposal = components['schemas']['ProposalOut']
+
 export interface Citation {
   kind: 'document' | 'record'
   title: string
@@ -59,3 +64,4 @@ export type StreamEvent =
   | { event: 'playbook_step'; data: ShownStep }
   | { event: 'completed'; data: { answer: Answer } }
   | { event: 'failed'; data: { reason: string } }
+  | { event: 'action_proposed'; data: Proposal }

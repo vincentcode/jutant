@@ -12,6 +12,7 @@ from typing import Any
 
 import yaml
 
+from core.actions.types import Action
 from core.features.templates import TEMPLATES
 from core.packs.manifest import DetailDef, NeedsDef, PackManifest
 from core.policy.rules import FieldRule, Rule
@@ -40,6 +41,13 @@ class Pack:
     rules: tuple[Rule, ...]
     field_rules: tuple[FieldRule, ...]
     eval_questions: tuple[dict[str, Any], ...] = ()
+
+    @property
+    def actions(self) -> tuple[Action, ...]:
+        return tuple(
+            Action(a.id, a.title, a.propose, a.perform, tuple(a.roles), a.expires_s, a.icon)
+            for a in self.manifest.actions
+        )
 
     @property
     def entity_types(self) -> tuple[EntityType, ...]:

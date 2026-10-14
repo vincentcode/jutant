@@ -32,6 +32,7 @@ INSTALLED_APPS = [
     "apps.knowledge",
     "apps.playbooks",
     "apps.audit",
+    "apps.actions",
     "apps.evals",
     "ingestion",
 ]

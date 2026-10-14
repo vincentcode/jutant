@@ -154,6 +154,18 @@ class HomeDef(BaseModel):
     cards: list[HomeCard] = []
 
 
+class ActionDef(BaseModel):
+    """Something done in a client system once the person confirms it (`core.actions`)."""
+
+    id: str
+    title: str
+    propose: str  # the tool a feature lists: checks the request, returns a draft
+    perform: str  # the tool that does it: no feature may list it
+    roles: list[str] = []
+    expires_s: int = 600
+    icon: str = "send"
+
+
 class PackManifest(BaseModel):
     name: str
     display_name: str
@@ -174,3 +186,4 @@ class PackManifest(BaseModel):
     # follow-up's lookups use it ("why did it fail?" after TX-0002).
     entities: dict[str, EntityDef] = {}
     policy: str  # dotted path to a module exposing RULES
+    actions: list[ActionDef] = []

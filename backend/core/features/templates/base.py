@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 from uuid import UUID
 
+from core.actions.drafts import read_draft
 from core.context.entities import values_in
 from core.errors import InvalidToolCall, ModelUnavailable, UnknownTool
 from core.events import Event, Failed, TextDelta, ToolFinished, ToolStarted
@@ -66,6 +67,9 @@ class FeatureContext:
     # The pack's entity types: a prefetched record's values that are ids of these (a failure
     # code) let a second round of prefetch calls be made (the code's explanation).
     entity_types: tuple[EntityType, ...] = ()
+    # The pack's propose tools (`core.actions`): a call that returns a draft ends the turn, and
+    # the orchestrator shows the draft as a card to send. The model writes nothing after it.
+    proposals: frozenset[str] = frozenset()
     # The kinds of help the caller's role has, as (feature id, title, description): what the
     # assistant can say it does, and the features the conversation can pass a turn to.
     offers: tuple[tuple[str, str, str], ...] = ()
@@ -153,6 +157,8 @@ async def tool_loop(
             if ctx.results[-1].error == DENIED:
                 yield Failed(DENIED)
                 return
+            if proposes(ctx, call, ctx.results[-1]):
+                return  # made in code from what staff gave: the card is the answer
             messages.append(Message("tool", tool_message(ctx.results[-1]), tool_call_id=call.id))
 
     if records and (record := single_record(ctx.results)) is not None:
@@ -196,6 +202,8 @@ async def tool_loop(
             if result.error == DENIED:
                 yield Failed(DENIED)
                 return
+            if proposes(ctx, call, result):
+                return  # the card speaks for itself; nothing is sent until it is confirmed
             messages.append(Message("tool", tool_message(result), tool_call_id=call.id))
             if not result.ok:
                 failures += 1
@@ -213,6 +221,12 @@ def _pointed_to(ctx: FeatureContext) -> dict[str, str]:
             for kind, value in values_in(result.data, ctx.entity_types).items():
                 found.setdefault(kind, value)
     return found
+
+
+def proposes(ctx: FeatureContext, call: ToolCall, result: ToolResult) -> bool:
+    """Whether a call proposed something to send: a propose tool that returned a draft. One
+    that refused (no draft) goes back to the model, to say why."""
+    return call.name in ctx.proposals and result.ok and read_draft(result.data) is not None
 
 
 async def run_call(ctx: FeatureContext, call: ToolCall) -> AsyncIterator[Event]:

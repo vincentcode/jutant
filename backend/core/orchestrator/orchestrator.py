@@ -44,6 +44,8 @@ from dataclasses import replace
 from typing import Literal
 from uuid import UUID
 
+from core.actions.drafts import read_draft
+from core.actions.service import ActionService
 from core.context import (
     DOCUMENT,
     ContextStack,
@@ -56,6 +58,7 @@ from core.context import (
 from core.context.reader import Reading, ReplyAs, certain, continues, read, same_subject
 from core.errors import ModelUnavailable, PolicyDenied
 from core.events import (
+    ActionProposed,
     Choice,
     Clarify,
     ClarifyReason,
@@ -102,6 +105,7 @@ WHICH = "I'm not sure what this is about. Which is it?"
 START = "What would you like to know?"
 EXAMPLE = " For example: “{example}”"
 PROCEDURE_TEMPLATE = "guided_playbook"
+CHECK_THE_REQUEST = "Check the request below. Nothing is sent until you send it."
 TurnMode = Literal["route", "hybrid", "agent"]
 
 
@@ -126,6 +130,7 @@ class Orchestrator:
         entity_types: Sequence[EntityType] = (),
         turn_mode: TurnMode = "route",
         tool_labels: Mapping[str, str] | None = None,
+        actions: ActionService | None = None,
     ):
         self.model = model
         self.tools = tools
@@ -146,6 +151,7 @@ class Orchestrator:
         self.runner = PlaybookRunner(playbooks, audit, model)
         self.turn_mode = turn_mode
         self.tool_labels = dict(tool_labels or {})  # what each tool looks at, in staff's words
+        self.actions = actions  # requests to send once confirmed (`core.actions`), if any
 
     async def load_tools(self) -> None:
         """Read the tool list from every MCP server. Call once at start-up."""
@@ -626,6 +632,7 @@ class Orchestrator:
                     and not (open_procedure and f.template == PROCEDURE_TEMPLATE)
                 ),
                 prefer=switched,
+                proposals=self._proposals(),
                 subjects_open=any(f.id != frame.id for f in stack.frames),
                 catalogue=catalogue(
                     self.registry, caller.role, self.tool_labels, _passing_ids(self)
@@ -1049,6 +1056,7 @@ class Orchestrator:
         sent = 0  # how much of it has been passed on
         steps: list[PlaybookStepShown] = []
         calls: list[ToolCall] = []
+        proposed = False
         try:
             async for event in events:
                 if isinstance(event, Failed):
@@ -1073,6 +1081,12 @@ class Orchestrator:
                     tool_started = time.perf_counter()
                 elif isinstance(event, ToolFinished):
                     timer.tool_s += time.perf_counter() - tool_started
+                    card = await self._proposal(caller, conversation_id, calls, event.result)
+                    if card is not None:
+                        yield event
+                        yield card
+                        proposed = True
+                        continue
                 elif isinstance(event, Clarify):
                     await self._audit_clarify(caller, conversation_id, event)
                 elif isinstance(event, PlaybookStepShown):
@@ -1097,7 +1111,9 @@ class Orchestrator:
             return
 
         citations = collect(results or [])
-        if requires_citation and not citations:
+        if proposed:
+            text = text or CHECK_THE_REQUEST
+        elif requires_citation and not citations:
             text, sent = NO_SOURCE_MESSAGE, 0  # nothing was sent: no citations, no streaming
         if len(text) > sent:
             yield TextDelta(text[sent:], continues=sent > 0)
@@ -1121,6 +1137,29 @@ class Orchestrator:
         )
         trace.set(output=trace.text(text), citations=len(citations), **_timing(timer))
         yield Completed(Answer(text, feature_id, citations, tuple(calls)))
+
+    def _proposals(self) -> frozenset[str]:
+        if self.actions is None:
+            return frozenset()
+        return frozenset(a.propose for a in self.actions.actions.values())
+
+    async def _proposal(
+        self,
+        caller: Caller,
+        conversation_id: UUID,
+        calls: Sequence[ToolCall],
+        result: ToolResult,
+    ) -> ActionProposed | None:
+        """A propose tool's draft, kept as a proposal to send: the card to show. None for any
+        other result, a refusal (no draft), or an action the caller's role may not propose."""
+        if self.actions is None or not result.ok:
+            return None
+        call = next((c for c in reversed(calls) if c.id == result.call_id), None)
+        action = self.actions.proposed_by(call.name) if call is not None else None
+        draft = read_draft(result.data)
+        if action is None or draft is None or not action.allows(caller.role):
+            return None
+        return ActionProposed(await self.actions.propose(caller, conversation_id, action, draft))
 
     async def _audit_answer(
         self,

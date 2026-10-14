@@ -107,10 +107,10 @@ source_modules = ["api"]
 # import from api/ is forbidden.
 allow_indirect_imports = true
 forbidden_modules = ["apps.identity.models", "apps.conversation.models", "apps.knowledge.models",
-                     "apps.playbooks.models", "apps.audit.models"]
+                     "apps.playbooks.models", "apps.audit.models", "apps.actions.models"]
 
 [[tool.importlinter.contracts]]
 name = "Apps do not import each other's models"
 type = "independence"
 modules = ["apps.identity.models", "apps.conversation.models", "apps.knowledge.models",
-           "apps.playbooks.models", "apps.audit.models"]
+           "apps.playbooks.models", "apps.audit.models", "apps.actions.models"]

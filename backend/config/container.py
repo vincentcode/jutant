@@ -10,11 +10,13 @@ from typing import Any
 
 from django.conf import settings
 
+from apps.actions.adapters import DjangoActionStore
 from apps.audit.adapters import DjangoAuditSink
 from apps.conversation.adapters import DjangoConversationStore
 from apps.identity.adapters import DjangoIdentityProvider, LoginLimits
 from apps.knowledge.adapters import DocumentLibrary
 from apps.playbooks.adapters import DjangoPlaybookStore
+from core.actions.service import ActionService
 from core.errors import PackContractError
 from core.features.registry import FeatureRegistry
 from core.features.router import FeatureRouter
@@ -57,6 +59,7 @@ class Runtime:
     ocr: OcrEngine | None
     feedback: FeedbackSink = field(default_factory=NoFeedbackSink)  # ratings, to traces too
     library: DocumentLibrary = field(default_factory=DocumentLibrary)  # the Knowledge panel
+    actions: ActionService | None = None  # requests staff send once they confirm them
 
     async def start(self) -> None:
         """Connect to the MCP servers, read their tools and check the pack contract.
@@ -99,6 +102,11 @@ def build_runtime(
     registry = FeatureRegistry(pack.features)
     audit = DjangoAuditSink()
     gateway = ToolGateway(tool_client, ToolCatalog(tool_client), audit)
+    actions = (
+        ActionService(pack.actions, DjangoActionStore(), tool_client, conversations, audit)
+        if pack.actions
+        else None
+    )
     orchestrator = Orchestrator(
         model=model,
         tools=tool_client,
@@ -124,6 +132,7 @@ def build_runtime(
         entity_types=pack.entity_types,
         turn_mode=_turn_mode(settings.JUTANT_TURN_MODE),
         tool_labels=pack.manifest.tool_labels,
+        actions=actions,
     )
     return Runtime(
         feedback=tracing.feedback_sink(settings),
@@ -140,6 +149,7 @@ def build_runtime(
         ),
         conversations=conversations,
         ocr=ocr or TesseractOcr(),
+        actions=actions,
     )
 
 

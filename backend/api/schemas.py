@@ -6,6 +6,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from core.actions.types import Proposal
+
 MAX_QUESTION_CHARS = 4000
 
 
@@ -91,6 +93,30 @@ class StepOut(BaseModel):
     answered: str | None = None  # answered from a looked-up record
 
 
+class FieldOut(BaseModel):
+    label: str
+    value: str
+
+
+class ProposalOut(BaseModel):
+    """A request the assistant proposed: the client shows it as a card to send, change or
+    cancel. What will be sent is shown in `fields`; the system's own arguments stay here."""
+
+    id: UUID
+    action_id: str
+    title: str
+    icon: str
+    summary: str
+    fields: list[FieldOut]
+    notes: list[str]
+    warnings: list[str]
+    status: Literal["proposed", "sending", "sent", "failed", "cancelled", "expired"]
+    reference: str  # the request's number, once sent
+    outcome: str  # its status in that system, or why it could not be sent
+    expires_at: datetime
+    created_at: datetime | None = None  # where the card sits among the messages
+
+
 FeedbackReason = Literal["wrong_answer", "wrong_source", "wrong_feature", "too_slow", "other"]
 
 
@@ -162,3 +188,22 @@ class HealthOut(BaseModel):
     database: bool
     model: bool
     mcp_servers: dict[str, bool]
+
+
+def proposal_out(proposal: Proposal) -> ProposalOut:
+    draft = proposal.draft
+    return ProposalOut(
+        id=proposal.id,
+        action_id=proposal.action_id,
+        title=proposal.title,
+        icon=proposal.icon,
+        summary=draft.summary,
+        fields=[FieldOut(label=f.label, value=f.value) for f in draft.fields],
+        notes=list(draft.notes),
+        warnings=list(draft.warnings),
+        status=proposal.status,
+        reference=proposal.reference,
+        outcome=proposal.outcome,
+        expires_at=proposal.expires_at,
+        created_at=proposal.created_at,
+    )

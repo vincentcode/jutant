@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from typing import Literal
 
+from core.actions.types import Proposal
 from core.types import Answer, PlaybookStep, ToolCall, ToolResult
 
 
@@ -96,6 +97,14 @@ class Clarify:
 ClarifyReason = Literal["unread", "same_or_new", "ask_which", "no_valid_call", "talk", "detail"]
 
 
+@dataclass(frozen=True)
+class ActionProposed:
+    """A request the person can send: the client shows it as a card with Send, Change and
+    Cancel. Sending goes from the client to the server, never through the model."""
+
+    proposal: Proposal
+
+
 Event = (
     FeatureSelected
     | ToolStarted
@@ -106,4 +115,5 @@ Event = (
     | Failed
     | Clarify
     | HandOver
+    | ActionProposed
 )

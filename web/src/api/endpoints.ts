@@ -79,3 +79,15 @@ export const documents = (q: string, type = '') => {
   const query = params.toString()
   return apiJson<LibraryDocument[]>(`/documents${query ? `?${query}` : ''}`)
 }
+
+/** A request the assistant proposed, shown as a card: nothing is sent until staff send it. */
+export type Proposal = Schemas['ProposalOut']
+
+export const proposals = (conversationId: string) =>
+  apiJson<Proposal[]>(`/conversations/${conversationId}/actions`)
+
+export const confirmProposal = (conversationId: string, proposalId: string) =>
+  apiJson<Proposal>(`/conversations/${conversationId}/actions/${proposalId}/confirm`, { method: 'POST' })
+
+export const cancelProposal = (conversationId: string, proposalId: string) =>
+  apiJson<Proposal>(`/conversations/${conversationId}/actions/${proposalId}/cancel`, { method: 'POST' })
