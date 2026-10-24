@@ -10,6 +10,7 @@ added to a server without an access rule, or without the guard, fails the build.
 """
 
 import importlib
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -69,3 +70,17 @@ def test_a_conversation_feature_takes_the_templates_own_examples() -> None:
     [talk] = [f for f in pack.features if f.template == "conversation"]
     assert "What tools do you have?" in talk.route_examples  # the platform's
     assert "Hello, good morning" in talk.route_examples  # and the pack's
+
+
+async def test_an_entity_found_by_a_tool_no_server_offers_fails() -> None:
+    pack = load_pack(PACKS_DIR / "banking")
+    entities = dict(pack.manifest.entities)
+    entities["product"] = entities["product"].model_copy(update={"find": "services.find_it"})
+    entities["loan"] = entities["loan"].model_copy(update={"find": "services.search_products"})
+    broken = replace(pack, manifest=pack.manifest.model_copy(update={"entities": entities}))
+    problems = check(broken, await offered_tools(servers_for(pack)))
+    assert sorted(problems) == [
+        "entity loan: find needs a name_field to read the names it finds",
+        "entity product: find tool services.find_it is not offered by any server",
+    ]
+    assert load_pack(PACKS_DIR / "banking").entity_types  # the real pack is untouched

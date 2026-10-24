@@ -55,7 +55,7 @@ class Pack:
     @property
     def entity_types(self) -> tuple[EntityType, ...]:
         return tuple(
-            EntityType(name, e.pattern, tuple(e.words), e.name_field)
+            EntityType(name, e.pattern, tuple(e.words), e.name_field, e.find)
             for name, e in self.manifest.entities.items()
         )
 

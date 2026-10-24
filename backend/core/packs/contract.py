@@ -77,6 +77,10 @@ def check(pack: Pack, tool_specs: list[ToolSpec]) -> list[str]:
     for name, entity in m.entities.items():
         if (error := _regex_problem(entity.pattern, 1)) is not None:
             problems.append(f"entity {name}: pattern {entity.pattern!r}: {error}")
+        if entity.find and entity.find not in tools:
+            problems.append(f"entity {name}: find tool {entity.find} is not offered by any server")
+        if entity.find and not entity.name_field:
+            problems.append(f"entity {name}: find needs a name_field to read the names it finds")
 
     for tool in sorted(tools - ruled):
         problems.append(f"tool {tool} has no access rule")

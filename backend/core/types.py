@@ -121,6 +121,10 @@ class EntityType:
     # In a tool result, the field holding one's name ("Standard Savings" for SAV-STD), so a
     # later message using the name points to it.
     name_field: str | None = None
+    # A tool that searches for one by text (its first argument): asked with the question when a
+    # lookup needs one the question names but gives no id for. A name it returns counts only if
+    # the question says it (`core.context.entities.named`).
+    find: str = ""
 
 
 @dataclass(frozen=True)

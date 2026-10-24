@@ -11,6 +11,7 @@ name means the id, so "the Standard Savings rate" later points to SAV-STD withou
 
 import re
 from collections.abc import Iterable, Mapping, Sequence
+from difflib import SequenceMatcher
 from typing import Any
 
 from core.types import Citation, EntityType, ToolCall, ToolResult
@@ -32,6 +33,29 @@ def entities_in(
         if kind not in found and re.search(rf"(?i)\b{re.escape(name)}\b", text):
             found[kind] = value
     return found
+
+
+def named(text: str, names: Mapping[str, tuple[str, str]], kind: str) -> str | None:
+    """The id of the one `kind` whose name (lower-case name -> (type, id)) the text says, word
+    by word, allowing a slip in a longer word ("standrd savings"); None if no name, or more than
+    one, is said."""
+    words = re.findall(r"[a-z0-9]+", text.lower())
+    said: set[str] = set()
+    for name, (name_kind, value) in names.items():
+        parts = re.findall(r"[a-z0-9]+", name.lower())
+        if name_kind != kind or not parts:
+            continue
+        for start in range(len(words) - len(parts) + 1):
+            window = words[start : start + len(parts)]
+            if all(_close(word, part) for word, part in zip(window, parts, strict=True)):
+                said.add(value)
+                break
+    return said.pop() if len(said) == 1 else None
+
+
+def _close(word: str, part: str) -> bool:
+    """The same word, or one slip away in a word long enough that a slip is still clear."""
+    return word == part or (len(part) >= 6 and SequenceMatcher(None, word, part).ratio() >= 0.8)
 
 
 def values_in(data: Any, types: Sequence[EntityType]) -> dict[str, str]:

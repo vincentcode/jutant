@@ -98,6 +98,7 @@ class EntityDef(BaseModel):
     pattern: str
     words: list[str] = []
     name_field: str | None = None  # in tool results, the field holding one's name
+    find: str = ""  # a tool searching for one by text, to find it by the name staff use
 
 
 class PrefetchDef(BaseModel):
