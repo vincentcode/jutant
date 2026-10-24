@@ -137,10 +137,15 @@ class Deployment:
     def eval_questions(self) -> tuple[dict[str, Any], ...]:
         """Every pack's questions, each with its pack and its feature as the deployment names
         it."""
+        return self.eval_set("")
+
+    def eval_set(self, name: str) -> tuple[dict[str, Any], ...]:
+        """Every pack's questions in the set `name` (`evals/<name>.yaml`; "" for the pack's
+        own `questions.yaml`), named as `eval_questions` names them."""
         return tuple(
             {**q, "pack": p.manifest.name, "feature": self.feature_id(p, str(q["feature"]))}
             for p in self.packs
-            for q in p.eval_questions
+            for q in (p.eval_questions if not name else dict(p.eval_sets).get(name, ()))
         )
 
     def readable_classifications(self, caller: Caller) -> list[str]:

@@ -1,0 +1,253 @@
+# Held-out questions for understanding: run with `python manage.py run_evals --set heldout`.
+#
+# Written before the fixes for control phrases, product names and features the role may not use,
+# to show whether those fixes generalise or only fit the phrasings that exposed the problems.
+# Keep them out of tuning: never copy one into a feature's route examples or a rule, and do not
+# reword one to make it pass. Add new phrasings instead.
+#
+# Same format as questions.yaml. Answers come from the fake bank: Standard Savings (SAV-STD) pays
+# 8.5% with no monthly fee, for individuals 18 and over; Business Current (CUR-BIZ) charges 25.00
+# a month, for registered businesses, with a certificate of incorporation. TX-0002 failed: the
+# beneficiary account is closed.
+
+# --- Control: resuming a paused procedure ------------------------------------------------------
+# A failed-transfer procedure is open at its last step; a product question set it aside. The
+# question asks to go back to it: the procedure's step is shown again, not the product.
+
+- id: u01
+  feature: troubleshooting
+  role: teller
+  attributes: {branch: ACC-01}
+  before: ["I had a failed transfer", "TX-0002", "What is the interest rate on Standard Savings?"]
+  question: "ok continue"
+  expect_contains: ["closed"]
+
+- id: u02
+  feature: troubleshooting
+  role: teller
+  attributes: {branch: ACC-01}
+  before: ["I had a failed transfer", "TX-0002", "What is the interest rate on Standard Savings?"]
+  question: "carry on"
+  expect_contains: ["closed"]
+
+- id: u03
+  feature: troubleshooting
+  role: teller
+  attributes: {branch: ACC-01}
+  before: ["I had a failed transfer", "TX-0002", "What is the interest rate on Standard Savings?"]
+  question: "let's go back to the failed transfer"
+  expect_contains: ["closed"]
+
+- id: u04
+  feature: troubleshooting
+  role: teller
+  attributes: {branch: ACC-01}
+  before: ["I had a failed transfer", "TX-0002", "What is the interest rate on Standard Savings?"]
+  question: "where were we?"
+  expect_contains: ["closed"]
+
+- id: u05
+  feature: troubleshooting
+  role: teller
+  attributes: {branch: ACC-01}
+  before: ["I had a failed transfer", "TX-0002", "What is the interest rate on Standard Savings?"]
+  question: "back to it"
+  expect_contains: ["closed"]
+
+- id: u06
+  feature: troubleshooting
+  role: teller
+  attributes: {branch: ACC-01}
+  before: ["I had a failed transfer", "TX-0002", "What is the interest rate on Standard Savings?"]
+  question: "resume please"
+  expect_contains: ["closed"]
+
+- id: u07
+  feature: troubleshooting
+  role: teller
+  attributes: {branch: ACC-01}
+  before: ["I had a failed transfer", "TX-0002", "What is the interest rate on Standard Savings?"]
+  question: "can we finish the transfer one now?"
+  expect_contains: ["closed"]
+
+- id: u08
+  feature: troubleshooting
+  role: teller
+  attributes: {branch: ACC-01}
+  before: ["I had a failed transfer", "TX-0002", "What is the interest rate on Standard Savings?"]
+  question: "go on with the procedure"
+  expect_contains: ["closed"]
+
+# Not control: a side question while the procedure is open is answered, and does not resume it.
+
+- id: u09
+  feature: product_lookup
+  role: teller
+  attributes: {branch: ACC-01}
+  before: ["I had a failed transfer", "TX-0002"]
+  question: "How much interest does Standard Savings pay?"
+  expect_tool: services.get_product
+  expect_contains: ["8.5"]
+  expect_citation: true
+
+- id: u10
+  feature: product_lookup
+  role: teller
+  attributes: {branch: ACC-01}
+  before: ["I had a failed transfer", "TX-0002"]
+  question: "what does a business current account cost per month"
+  expect_tool: services.get_product
+  expect_contains: ["25"]
+  expect_citation: true
+
+# --- Product names, without their codes --------------------------------------------------------
+
+- id: u11
+  feature: product_lookup
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "how much interest does standard savings pay"
+  expect_tool: services.get_product
+  expect_contains: ["8.5"]
+  expect_citation: true
+
+- id: u12
+  feature: product_lookup
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "Standard Savings rate?"
+  expect_tool: services.get_product
+  expect_contains: ["8.5"]
+  expect_citation: true
+
+- id: u13
+  feature: product_lookup
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "what's the monthly charge on business current"
+  expect_tool: services.get_product
+  expect_contains: ["25"]
+  expect_citation: true
+
+- id: u14
+  feature: product_lookup
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "Is there a monthly fee for a Business Current account?"
+  expect_tool: services.get_product
+  expect_contains: ["25"]
+  expect_citation: true
+
+- id: u15
+  feature: product_lookup
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "Who is eligible for Standard Savings?"
+  expect_tool: services.get_product
+  expect_contains: ["18"]
+  expect_citation: true
+
+- id: u16
+  feature: product_lookup
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "What documents does a Business Current account need?"
+  expect_tool: services.get_product
+  expect_contains: ["incorporation"]
+  expect_citation: true
+
+- id: u17
+  feature: product_lookup
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "standrd savings interest rate"
+  expect_tool: services.get_product
+  expect_contains: ["8.5"]
+  expect_citation: true
+
+- id: u18
+  feature: product_lookup
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "rate for the standard savings acct"
+  expect_tool: services.get_product
+  expect_contains: ["8.5"]
+  expect_citation: true
+
+# --- Kinds of help the role may not use --------------------------------------------------------
+# A teller asks for what only customer service, credit officers and branch managers may use: the
+# answer says so, and nothing about the customer reaches the teller.
+
+- id: u19
+  feature: customer_360
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "Give me an overview of customer C1001"
+  expect_denied: true
+  expect_contains: ["customer service"]
+
+- id: u20
+  feature: customer_360
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "summarise customer C1001 for me"
+  expect_denied: true
+  expect_contains: ["customer service"]
+
+- id: u21
+  feature: customer_360
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "What do we know about customer C1001?"
+  expect_denied: true
+  expect_contains: ["customer service"]
+
+- id: u22
+  feature: customer_360
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "I need the full customer profile for C1001"
+  expect_denied: true
+  expect_contains: ["customer service"]
+
+- id: u23
+  feature: loans_and_deposits
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "Is loan LN-1001 in arrears?"
+  expect_denied: true
+  expect_contains: ["customer service"]
+
+- id: u24
+  feature: loans_and_deposits
+  role: teller
+  attributes: {branch: ACC-01}
+  question: "when does the customer's fixed deposit mature"
+  expect_denied: true
+  expect_contains: ["customer service"]
+
+# --- Follow-ups that name only a field (measured, not yet fixed) -------------------------------
+
+- id: u25
+  feature: product_lookup
+  role: teller
+  attributes: {branch: ACC-01}
+  before: ["What is the interest rate on Standard Savings?"]
+  question: "and the monthly fee?"
+  expect_contains: ["0.00"]
+
+- id: u26
+  feature: product_lookup
+  role: teller
+  attributes: {branch: ACC-01}
+  before: ["What is the monthly fee on the Business Current account?"]
+  question: "who can open one?"
+  expect_contains: ["registered businesses"]
+
+- id: u27
+  feature: product_lookup
+  role: teller
+  attributes: {branch: ACC-01}
+  before: ["What is the monthly fee on the Business Current account?"]
+  question: "what about the documents?"
+  expect_contains: ["incorporation"]

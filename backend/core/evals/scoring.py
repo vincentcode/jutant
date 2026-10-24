@@ -72,6 +72,9 @@ def score(result: QuestionResult) -> QuestionResult:
     checks: dict[str, bool] = {}
     if q.expect_denied:
         checks["refused"] = result.refused
+        if q.expect_contains:  # what the refusal tells staff, such as who may use it
+            text = result.answer.lower()
+            checks["contains"] = all(phrase.lower() in text for phrase in q.expect_contains)
     else:
         checks["routed"] = result.routed_to == q.feature
         checks["answered"] = result.failed is None
