@@ -213,8 +213,8 @@ async def test_when_not_guessing_a_pattern_gives_way_to_the_default_by_meaning()
     features = [
         replace(f, route_examples=("card",)) if f.id == "policy_qa" else f for f in features
     ]
-    r, model = router(features=features)
-    r.model = model = TopicModel()
+    model = TopicModel()
+    r = FeatureRouter(model, FeatureRegistry(features), default="policy_qa")
     route = await r.route(teller(), "block the card on TX-0002", model, guess=False)
     assert (route.feature.id, route.by) == ("policy_qa", "unsure")  # the default here
     sure = await r.route(teller(), "the transfer TX-0002", model, guess=False)
@@ -238,3 +238,27 @@ async def test_a_question_clearly_for_a_feature_the_role_may_not_use_says_so() -
     assert route.feature.id == "customer_360" and route.by == "unavailable"
     manager = Caller("S9", "branch_manager", "staff", {})
     assert (await r.route(manager, "the card is blocked")).by == "meaning"
+
+
+async def test_another_intent_classifier_takes_the_place_of_meaning() -> None:
+    """A trained classifier (Rasa NLU, say) plugs in behind the port: the router keeps its own
+    order and thresholds, and only the meaning step changes."""
+
+    class Trained:
+        asked: list[str] = []
+
+        async def scores(self, text, features, model=None):
+            Trained.asked.append(text)
+            return sorted(
+                ((0.9 if f.id == "transaction_lookup" else 0.2, f) for f in features),
+                key=lambda pair: -pair[0],
+            )
+
+    class NoEmbeddings(FakeModel):
+        async def embed(self, texts):
+            raise AssertionError("the default classifier is not used")
+
+    r = FeatureRouter(NoEmbeddings(), FeatureRegistry(FEATURES), "policy_qa", classifier=Trained())
+    route = await r.route(teller(), "money sent yesterday never arrived")
+    assert (route.feature.id, route.by, route.score) == ("transaction_lookup", "meaning", 0.9)
+    assert Trained.asked == ["money sent yesterday never arrived"]

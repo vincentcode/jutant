@@ -1,6 +1,6 @@
 """Protocols the core depends on. Django apps and providers implement them."""
 
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Mapping, Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Protocol
 from uuid import UUID
@@ -10,6 +10,7 @@ from core.types import (
     Citation,
     DocumentHit,
     DocumentText,
+    Feature,
     Message,
     ModelReply,
     Playbook,
@@ -54,6 +55,23 @@ class ModelProvider(Protocol):
         ...
 
     async def embed(self, texts: list[str]) -> list[list[float]]: ...
+
+
+class IntentClassifier(Protocol):
+    """Which kind of help a question is for, by its words alone: the router's step between
+    patterns and the model. Comparing with each feature's examples by meaning is the default
+    (`core.features.meaning`); a trained classifier (Rasa NLU, or one trained on embeddings) can
+    take its place in `providers/`."""
+
+    async def scores(
+        self, text: str, features: Sequence[Feature], model: "ModelProvider | None" = None
+    ) -> list[tuple[float, Feature]]:
+        """Each of `features` with how close `text` is to it (0 to 1, higher is closer),
+        closest first; empty when it cannot tell (nothing to compare with, or its own model
+        cannot be reached). `model`: the turn's model (traced and timed), for a classifier
+        that uses the platform's own; others ignore it. The router decides with its own
+        thresholds, set for the classifier in use."""
+        ...
 
 
 class ToolClient(Protocol):
