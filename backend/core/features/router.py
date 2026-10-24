@@ -53,7 +53,15 @@ MIN_SIMILARITY = 0.80
 MIN_MARGIN = 0.05
 
 RoutedBy = Literal[
-    "only", "pattern", "meaning", "preferred", "model", "keywords", "default", "unsure"
+    "only",
+    "pattern",
+    "meaning",
+    "preferred",
+    "model",
+    "keywords",
+    "default",
+    "unsure",
+    "unavailable",  # clearly a feature the caller may not use: staff are told, nothing is run
 ]
 
 
@@ -101,7 +109,11 @@ class FeatureRouter:
         available = [f for f in self.registry.for_caller(caller) if f.id not in exclude]
         if not available:
             raise LookupError(f"No features for {caller.id} ({caller.role})")
-        if len(available) == 1:
+        # Features the caller may not use take part in patterns and meaning only, so a question
+        # clearly for one is told so instead of going quietly to the nearest it may use. The
+        # model is never offered them: a longer list makes a small model drift.
+        others = [f for f in self.registry if not f.allows_caller(caller) and f.id not in exclude]
+        if len(available) == 1 and not others:
             return Route(available[0], "only")
         by_id = {f.id: f for f in available}
         preferred = by_id.get(prefer or "")
@@ -110,8 +122,19 @@ class FeatureRouter:
             return Route(preferred, "preferred")
         if len(matched) == 1 and guess:
             return Route(matched[0], "pattern")
+        if not matched and len(theirs := self._matching(text, others)) == 1:
+            return Route(theirs[0], "unavailable")
 
-        scored = await self._scores(text, available, model)
+        everything = await self._scores(text, [*available, *others], model)
+        if (
+            everything
+            and everything[0][1] in others
+            and self._clear(everything, next((s for s, f in everything if f in available), 0.0))
+        ):
+            return Route(everything[0][1], "unavailable", round(everything[0][0], 3))
+        if len(available) == 1:
+            return Route(available[0], "only")
+        scored = [(score, f) for score, f in everything if f.id in by_id]
         if len(matched) == 1:  # not guessing: the pattern, unless the meaning says otherwise
             own = next((score for score, f in scored if f is matched[0]), 0.0)
             default = by_id.get(self.default)

@@ -96,10 +96,23 @@ async def test_patterns_of_two_features_leave_it_to_the_next_step() -> None:
     assert (await r.route(teller(), "Why did TX-0002 fail?")).by == "model"
 
 
-async def test_a_pattern_of_a_feature_the_role_may_not_use_is_ignored() -> None:
-    r, _ = router("policy_qa", features=with_route("customer_360", patterns=[r"\bC\d{4}\b"]))
+async def test_a_pattern_of_a_feature_the_role_may_not_use_says_it_is_not_theirs() -> None:
+    r, model = router(features=with_route("customer_360", patterns=[r"\bC\d{4}\b"]))
     route = await r.route(teller(), "summary of customer C1001")
-    assert route.feature.id != "customer_360" and route.by == "model"
+    assert route.feature.id == "customer_360" and route.by == "unavailable"
+    assert model.calls == []
+
+
+async def test_a_pattern_the_role_may_use_wins_over_one_it_may_not() -> None:
+    features = [
+        replace(f, route_patterns=(r"\bC\d{4}\b",))
+        if f.id in ("customer_360", "transaction_lookup")
+        else f
+        for f in FEATURES
+    ]
+    r, _ = router(features=features)
+    route = await r.route(teller(), "transfers of customer C1001")
+    assert route.feature.id == "transaction_lookup" and route.by == "pattern"
 
 
 # --- meaning ------------------------------------------------------------------------------
@@ -214,3 +227,14 @@ def test_a_reply_naming_an_options_place_is_that_option() -> None:
     assert parse_choice(" 1. ", ids) == "thanks"
     assert parse_choice("4", ids) is None and parse_choice("0", ids) is None
     assert parse_choice("2", ["1", "2"]) == "2"  # an id wins over a place
+
+
+async def test_a_question_clearly_for_a_feature_the_role_may_not_use_says_so() -> None:
+    model = TopicModel()
+    examples = {"customer_360": ("card blocked",), "transaction_lookup": ("transfer missing",)}
+    features = [replace(f, route_examples=examples.get(f.id, ())) for f in FEATURES]
+    r = FeatureRouter(model, FeatureRegistry(features), default="policy_qa")
+    route = await r.route(teller(), "the card is blocked")
+    assert route.feature.id == "customer_360" and route.by == "unavailable"
+    manager = Caller("S9", "branch_manager", "staff", {})
+    assert (await r.route(manager, "the card is blocked")).by == "meaning"

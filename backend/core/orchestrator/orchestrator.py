@@ -64,7 +64,7 @@ from core.context.reader import (
     resumes,
     same_subject,
 )
-from core.errors import ModelUnavailable, PolicyDenied
+from core.errors import FeatureUnavailable, ModelUnavailable, PolicyDenied
 from core.events import (
     ActionProposed,
     Choice,
@@ -369,17 +369,24 @@ class Orchestrator:
             await self._audit_route(caller, conversation_id, feature, reading.by, turn)
         else:  # a new subject
             open_procedure = stack.procedure_frame()
-            feature = await self._resolve(
-                caller,
-                conversation_id,
-                text,
-                reading.feature_id,
-                turn,
-                preferred_feature_id,
-                chosen_by=reading.by if reading.feature_id and not feature_id else None,
-                # One procedure at a time: another starts only when staff lock it.
-                exclude=self._procedure_features() if open_procedure and not feature_id else (),
-            )
+            try:
+                feature = await self._resolve(
+                    caller,
+                    conversation_id,
+                    text,
+                    reading.feature_id,
+                    turn,
+                    preferred_feature_id,
+                    chosen_by=reading.by if reading.feature_id and not feature_id else None,
+                    # One procedure at a time: another starts only when staff lock it.
+                    exclude=self._procedure_features() if open_procedure and not feature_id else (),
+                )
+            except FeatureUnavailable as unavailable:
+                async for event in self._not_theirs(
+                    caller, conversation_id, text, unavailable, stored
+                ):
+                    yield event
+                return
             starts_procedure = feature.template == PROCEDURE_TEMPLATE
             if starts_procedure and (open_procedure := stack.procedure_frame()) is not None:
                 async for event in self._stop_quietly(
@@ -519,6 +526,23 @@ class Orchestrator:
         yield TextDelta(WHICH)
         yield asked
         yield Completed(Answer(WHICH, "", (), ()))
+
+    async def _not_theirs(
+        self,
+        caller: Caller,
+        conversation_id: UUID,
+        text: str,
+        unavailable: FeatureUnavailable,
+        stored: bool,
+    ) -> AsyncIterator[Event]:
+        """Tell staff the kind of help they asked for is not theirs, and whose it is. Written in
+        code; nothing is looked up and the conversation's subjects are unchanged."""
+        said = not_theirs(unavailable)
+        if not stored:
+            await self.conversations.append(conversation_id, Message("user", text))
+        await self.conversations.append(conversation_id, Message("assistant", said))
+        yield TextDelta(said)
+        yield Completed(Answer(said, "", (), ()))
 
     async def _audit_clarify(self, caller: Caller, conversation_id: UUID, asked: Clarify) -> None:
         """What staff were asked to pick from, and why: `report_turns` reads it."""
@@ -1072,6 +1096,11 @@ class Orchestrator:
                 )
             feature = route.feature
             detail["chosen_by"] = route.by  # pattern, meaning, model... to find misroutes
+            if route.by == "unavailable":
+                await self.audit.record(
+                    caller, "feature_unavailable", {**detail, "feature_id": feature.id}
+                )
+                raise FeatureUnavailable(feature.id, feature.title, feature.roles, feature.pack)
             if prefer:
                 detail["preferred"] = prefer
             if route.score is not None:
@@ -1295,3 +1324,14 @@ async def _then(first: AsyncIterator[Event], second: AsyncIterator[Event]) -> As
 
 def _timing(timer: TurnTimer) -> dict[str, int]:
     return {f"timing.{name}": value for name, value in timer.as_detail().items()}
+
+
+def not_theirs(unavailable: FeatureUnavailable) -> str:
+    """ "Customer 360 is only for customer service or branch manager staff...": the roles that
+    may use it, or else the pack it belongs to."""
+    roles = [role.replace("_", " ") for role in unavailable.roles]
+    if roles:
+        who = roles[0] if len(roles) == 1 else f"{', '.join(roles[:-1])} or {roles[-1]}"
+        return f"{unavailable.title} is only for {who} staff, so I can't help with that here."
+    area = unavailable.pack or "another area's"
+    return f"{unavailable.title} is {area} help, which your account does not include."
