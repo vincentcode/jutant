@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 from uuid import UUID
 
-from core.actions.drafts import read_draft
+from core.actions.drafts import read_draft, read_refusal
 from core.context.entities import values_in
 from core.errors import InvalidToolCall, ModelUnavailable, UnknownTool
 from core.events import Event, Failed, TextDelta, ToolFinished, ToolStarted
@@ -124,6 +124,8 @@ async def tool_loop(
 
     Replies are streamed, except one that may still be dropped that way.
 
+    A propose call made in code that the rules refuse answers with the refusal, in code.
+
     With `records`, when the calls made in code fetched exactly one record, its facts are set
     out in code and the model picks which field the question is about; if none says it, the
     answer is written in code ("the record does not show that"), see `core.features.records`.
@@ -159,6 +161,9 @@ async def tool_loop(
                 return
             if proposes(ctx, call, ctx.results[-1]):
                 return  # made in code from what staff gave: the card is the answer
+            if refusal := refused(ctx, call, ctx.results[-1]):
+                yield TextDelta(refusal)  # the rules' reason is the answer, not a record
+                return
             messages.append(Message("tool", tool_message(ctx.results[-1]), tool_call_id=call.id))
 
     if records and (record := single_record(ctx.results)) is not None:
@@ -227,6 +232,15 @@ def proposes(ctx: FeatureContext, call: ToolCall, result: ToolResult) -> bool:
     """Whether a call proposed something to send: a propose tool that returned a draft. One
     that refused (no draft) goes back to the model, to say why."""
     return call.name in ctx.proposals and result.ok and read_draft(result.data) is not None
+
+
+def refused(ctx: FeatureContext, call: ToolCall, result: ToolResult) -> str:
+    """Why a propose call proposed nothing, if it said: a refusal is not a record to answer
+    from (it has no field for "book leave", so it would read as "the record does not show
+    that")."""
+    if call.name not in ctx.proposals or not result.ok or read_draft(result.data) is not None:
+        return ""
+    return read_refusal(result.data)
 
 
 async def run_call(ctx: FeatureContext, call: ToolCall) -> AsyncIterator[Event]:
