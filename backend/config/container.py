@@ -145,6 +145,8 @@ def build_runtime(
             min_margin=settings.JUTANT_ROUTE_MIN_MARGIN,
             classifier=intent_factory.build(settings, model, registry),
         ),
+        act_classifier=intent_factory.build_acts(settings),
+        act_confidence=settings.JUTANT_ACT_CONFIDENCE,
         gateway=gateway,
         max_steps=settings.JUTANT_MAX_STEPS,
         history_limit=settings.JUTANT_HISTORY_LIMIT,

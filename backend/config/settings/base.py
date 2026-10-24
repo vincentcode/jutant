@@ -154,6 +154,10 @@ JUTANT_ROUTE_MIN_MARGIN = float(env("JUTANT_ROUTE_MIN_MARGIN", "0.05"))
 # The router's meaning step (`providers/intent`): "embedding" compares a question with each
 # feature's examples. The two thresholds above are set for the classifier in use.
 JUTANT_INTENT_CLASSIFIER = env("JUTANT_INTENT_CLASSIFIER", "embedding")
+# How a message relates to the conversation (`core.context.acts`): "" for none, so the code rules
+# and the model's questions decide; a trained classifier's act decides at this confidence or above.
+JUTANT_ACT_CLASSIFIER = env("JUTANT_ACT_CLASSIFIER", "")
+JUTANT_ACT_CONFIDENCE = float(env("JUTANT_ACT_CONFIDENCE", "0.8"))
 
 JUTANT_MAX_STEPS = int(env("JUTANT_MAX_STEPS", "4"))
 # How a new subject's feature is chosen. hybrid: the router when it is sure, else the

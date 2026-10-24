@@ -22,6 +22,7 @@ from core.types import (
 
 if TYPE_CHECKING:
     from core.actions.types import Proposal, ProposalStatus
+    from core.context.acts import Act, ActState
     from core.events import PlaybookStepShown
 
 AUDIT_EVENTS = (
@@ -71,6 +72,16 @@ class IntentClassifier(Protocol):
         cannot be reached). `model`: the turn's model (traced and timed), for a classifier
         that uses the platform's own; others ignore it. The router decides with its own
         thresholds, set for the classifier in use."""
+        ...
+
+
+class DialogueActClassifier(Protocol):
+    """How a message relates to the conversation (`core.context.acts`), from its words and the
+    conversation's state: trained on the acts the audit log records for every turn. Consulted
+    after the code rules and before the model's questions; a confident act decides."""
+
+    async def act(self, text: str, state: "ActState") -> "tuple[Act, float] | None":
+        """The act and how sure (0 to 1); None if it cannot tell."""
         ...
 
 
