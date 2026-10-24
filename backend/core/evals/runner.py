@@ -15,7 +15,14 @@ from typing import TYPE_CHECKING, Any
 
 from core.errors import PolicyDenied
 from core.evals.scoring import EvalQuestion, EvalReport, QuestionResult, score
-from core.events import Completed, Failed, FeatureSelected, ToolFinished, ToolStarted
+from core.events import (
+    Completed,
+    Failed,
+    FeatureSelected,
+    PlaybookStepShown,
+    ToolFinished,
+    ToolStarted,
+)
 from core.packs.deployment import Deployment
 from core.packs.loader import Pack
 from core.types import Caller, PackRole
@@ -87,8 +94,16 @@ async def ask(
                     result.tools_called.append(call.name)
                 case ToolFinished(tool_result) if tool_result.ok:
                     data_reached_caller = True
+                case PlaybookStepShown(step=step):
+                    # a procedure's step is the answer (going back to it shows its step again),
+                    # given by the feature that started it
+                    shown = f"{step.title}: {step.instruction}"
+                    result.answer = f"{result.answer} {shown}".strip()
+                    if result.routed_to is None:
+                        run = await orchestrator.playbooks.get_run(conversation_id)
+                        result.routed_to = run.feature_id if run is not None else None
                 case Completed(answer):
-                    result.answer = answer.text
+                    result.answer = answer.text or result.answer
                     result.citations = len(answer.citations)
                 case Failed(reason):
                     result.failed = reason

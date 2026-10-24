@@ -325,6 +325,41 @@ async def test_a_question_beside_a_procedure_leaves_it_waiting_until_resumed() -
     assert shown(resumed) == [2] and not rig.playbooks.runs[conversation].paused
 
 
+async def test_asking_in_words_to_go_back_resumes_the_paused_procedure() -> None:
+    """No Resume button: "carry on" after a side question names nothing. Asked only "more about
+    the side question, or something else?", the model said more of it; the paused procedure is
+    asked about first, as a two-way question."""
+    rig, model, conversation = await bank(
+        ModelReply("done"),  # step 1 done
+        ModelReply("policy_qa"),  # a side question
+        ModelReply("Two IDs."),
+        ModelReply("back"),  # "carry on": back to the procedure
+    )
+    await ask(rig, conversation, "card is blocked", "troubleshooting")
+    await ask(rig, conversation, "customer verified")
+    await ask(rig, conversation, "what ID do joint holders need?")
+    resumed = await ask(rig, conversation, "carry on")
+    assert shown(resumed) == [2] and not rig.playbooks.runs[conversation].paused
+    assert "Blocked card" in model.calls[-1].messages[0].content and not model.replies
+
+
+async def test_a_follow_up_to_the_side_question_leaves_the_procedure_paused() -> None:
+    rig, model, conversation = await bank(
+        ModelReply("done"),
+        ModelReply("policy_qa"),
+        ModelReply("Two IDs."),
+        ModelReply("other"),  # not back to the procedure
+        ModelReply("same"),  # more about the side question
+        ModelReply("And proof of address."),
+    )
+    await ask(rig, conversation, "card is blocked", "troubleshooting")
+    await ask(rig, conversation, "customer verified")
+    await ask(rig, conversation, "what ID do joint holders need?")
+    events = await ask(rig, conversation, "anything else they must bring?")
+    assert shown(events) == [] and "".join(texts(events)).endswith("And proof of address.")
+    assert rig.playbooks.runs[conversation].paused and not model.replies
+
+
 async def test_stopping_the_procedure_says_so_and_drops_its_subject() -> None:
     rig, _, conversation = await bank(ModelReply("stop"))
     await ask(rig, conversation, "card is blocked", "troubleshooting")

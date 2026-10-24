@@ -55,7 +55,15 @@ from core.context import (
     names_in,
     values_in,
 )
-from core.context.reader import Reading, ReplyAs, certain, continues, read, same_subject
+from core.context.reader import (
+    Reading,
+    ReplyAs,
+    certain,
+    continues,
+    read,
+    resumes,
+    same_subject,
+)
 from core.errors import ModelUnavailable, PolicyDenied
 from core.events import (
     ActionProposed,
@@ -269,6 +277,8 @@ class Orchestrator:
             gives,
             patterned.id if patterned is not None else None,
         )
+        if reading is None and not mentioned and stack.top is not None and not stack.top.procedure:
+            reading = await self._resumes(conversation_id, text, stack, turn, timer)
         if reading is None and not mentioned and stack.top is not None and not stack.top.procedure:
             reading = await self._continues(text, stack, turn, timer)
         if reading is None:
@@ -853,6 +863,24 @@ class Orchestrator:
         feature = self._feature(frame.feature_id)
         had = {k: v for k, v in frame.details.items() if k != ASKED}
         return update(feature, frame.details, text, mentioned) != had
+
+    async def _resumes(
+        self, conversation_id: UUID, text: str, stack: ContextStack, turn: Trace, timer: TurnTimer
+    ) -> Reading | None:
+        """A message naming nothing while a procedure waits below the subject on top: back to
+        the procedure? A two-way question; None (something else, or unclear) reads on."""
+        procedure = stack.procedure_frame()
+        current = await self.runner.current(conversation_id) if procedure is not None else None
+        if procedure is None or current is None or stack.top is None:
+            return None
+        title = f"{current[0]} procedure"  # "Failed transfer procedure"
+        subject = self._describe(stack.top, None, stack).split(": ", 1)[-1]
+        with turn.span("resume?", "chain", procedure=title) as span:
+            back = await resumes(
+                TimedModel(TracedModel(self.model, span), timer), text, title, subject
+            )
+            span.set(back=back)
+        return Reading("return", procedure.id, by="model:resumes") if back else None
 
     async def _continues(
         self, text: str, stack: ContextStack, turn: Trace, timer: TurnTimer
