@@ -30,6 +30,7 @@ from core.ports import ModelProvider
 from core.tools.catalog import ToolCatalog
 from core.tools.gateway import ToolGateway
 from providers import tracing
+from providers.intent import factory as intent_factory
 from providers.llm import factory as llm_factory
 from providers.mcp.client import McpToolClient
 from providers.ocr.base import OcrEngine
@@ -142,7 +143,10 @@ def build_runtime(
             embed_prefix=settings.JUTANT_EMBED_ROUTE_PREFIX,
             min_similarity=settings.JUTANT_ROUTE_MIN_SIMILARITY,
             min_margin=settings.JUTANT_ROUTE_MIN_MARGIN,
+            classifier=intent_factory.build(settings, model, registry),
         ),
+        act_classifier=intent_factory.build_acts(settings),
+        act_confidence=settings.JUTANT_ACT_CONFIDENCE,
         gateway=gateway,
         max_steps=settings.JUTANT_MAX_STEPS,
         history_limit=settings.JUTANT_HISTORY_LIMIT,

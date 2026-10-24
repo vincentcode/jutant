@@ -36,16 +36,15 @@ conversation context's to decide (`core.context`).
 The step that decided is recorded in the audit log, so a shortcut that misroutes can be found.
 """
 
-import math
 import re
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-from core.errors import ModelUnavailable
 from core.features.matching import Option, ask_model, best_keyword_match
+from core.features.meaning import EmbeddingIntentClassifier
 from core.features.registry import FeatureRegistry
-from core.ports import ModelProvider
+from core.ports import IntentClassifier, ModelProvider
 from core.types import Caller, Feature
 
 INSTRUCTION = "Choose the feature that best matches the staff member's question."
@@ -53,7 +52,15 @@ MIN_SIMILARITY = 0.80
 MIN_MARGIN = 0.05
 
 RoutedBy = Literal[
-    "only", "pattern", "meaning", "preferred", "model", "keywords", "default", "unsure"
+    "only",
+    "pattern",
+    "meaning",
+    "preferred",
+    "model",
+    "keywords",
+    "default",
+    "unsure",
+    "unavailable",  # clearly a feature the caller may not use: staff are told, nothing is run
 ]
 
 
@@ -74,15 +81,16 @@ class FeatureRouter:
         embed_prefix: str = "",
         min_similarity: float = MIN_SIMILARITY,
         min_margin: float = MIN_MARGIN,
+        classifier: IntentClassifier | None = None,
     ):
         self.model = model
         self.registry = registry
         self.default = default
-        self.embed_prefix = embed_prefix  # the embedding model's prefix for comparing texts
+        # The meaning step: by default the question compared with each feature's examples.
+        self.classifier = classifier or EmbeddingIntentClassifier(model, registry, embed_prefix)
         self.min_similarity = min_similarity
         self.min_margin = min_margin
         self._patterns = {f.id: [re.compile(p) for p in f.route_patterns] for f in registry}
-        self._examples: dict[str, list[list[float]]] | None = None  # embedded on first use
 
     async def route(
         self,
@@ -101,7 +109,11 @@ class FeatureRouter:
         available = [f for f in self.registry.for_caller(caller) if f.id not in exclude]
         if not available:
             raise LookupError(f"No features for {caller.id} ({caller.role})")
-        if len(available) == 1:
+        # Features the caller may not use take part in patterns and meaning only, so a question
+        # clearly for one is told so instead of going quietly to the nearest it may use. The
+        # model is never offered them: a longer list makes a small model drift.
+        others = [f for f in self.registry if not f.allows_caller(caller) and f.id not in exclude]
+        if len(available) == 1 and not others:
             return Route(available[0], "only")
         by_id = {f.id: f for f in available}
         preferred = by_id.get(prefer or "")
@@ -110,8 +122,19 @@ class FeatureRouter:
             return Route(preferred, "preferred")
         if len(matched) == 1 and guess:
             return Route(matched[0], "pattern")
+        if not matched and len(theirs := self._matching(text, others)) == 1:
+            return Route(theirs[0], "unavailable")
 
-        scored = await self._scores(text, available, model)
+        everything = await self._scores(text, [*available, *others], model)
+        if (
+            everything
+            and everything[0][1] in others
+            and self._clear(everything, next((s for s, f in everything if f in available), 0.0))
+        ):
+            return Route(everything[0][1], "unavailable", round(everything[0][0], 3))
+        if len(available) == 1:
+            return Route(available[0], "only")
+        scored = [(score, f) for score, f in everything if f.id in by_id]
         if len(matched) == 1:  # not guessing: the pattern, unless the meaning says otherwise
             own = next((score for score, f in scored if f is matched[0]), 0.0)
             default = by_id.get(self.default)
@@ -160,23 +183,9 @@ class FeatureRouter:
     async def _scores(
         self, text: str, available: Sequence[Feature], model: ModelProvider
     ) -> list[tuple[float, Feature]]:
-        """Each feature's best similarity to the question, highest first; empty if the
-        features have no examples or the embedding model cannot be reached."""
-        try:
-            examples = await self._embedded_examples()
-            if not any(examples.get(f.id) for f in available):
-                return []  # nothing to compare with: do not embed the question
-            [question] = await model.embed([self.embed_prefix + text])
-        except ModelUnavailable:
-            return []
-        return sorted(
-            (
-                (max(_cosine(question, e) for e in examples[f.id]), f)
-                for f in available
-                if examples.get(f.id)
-            ),
-            key=lambda pair: -pair[0],
-        )
+        """Each feature's closeness to the question by the intent classifier, highest first;
+        empty if it cannot tell."""
+        return await self.classifier.scores(text, available, model)
 
     def _by_meaning(self, scored: list[tuple[float, Feature]]) -> Route | None:
         if not scored:
@@ -185,25 +194,3 @@ class FeatureRouter:
         if self._clear(scored, runner_up):
             return Route(scored[0][1], "meaning", round(scored[0][0], 3))
         return None
-
-    async def _embedded_examples(self) -> dict[str, list[list[float]]]:
-        """Each feature's examples and description, embedded once and kept."""
-        if self._examples is None:
-            texts = [
-                (f.id, t)
-                for f in self.registry
-                if f.route_examples
-                for t in (*f.route_examples, f.description)
-            ]
-            vectors = await self.model.embed([self.embed_prefix + t for _, t in texts])
-            examples: dict[str, list[list[float]]] = {}
-            for (feature_id, _), vector in zip(texts, vectors, strict=True):
-                examples.setdefault(feature_id, []).append(vector)
-            self._examples = examples
-        return self._examples
-
-
-def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
-    dot = sum(x * y for x, y in zip(a, b, strict=True))
-    norm = math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(y * y for y in b))
-    return dot / norm if norm else 0.0

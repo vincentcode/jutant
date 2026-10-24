@@ -105,9 +105,10 @@ async def test_internal_documents_stay_hidden_from_roles_without_the_label() -> 
 
 
 async def test_product_lookup_searches_then_reads_the_product() -> None:
+    """The search runs in code with the question; several savings products match, so the model
+    chooses which one to read."""
     await make_staff("ama")
     turn = [
-        calls("services.search_products", query="savings"),
         calls("services.get_product", product_code="SAV-STD"),
         ModelReply("Standard Savings pays 8.5% with no monthly fee."),
     ]

@@ -368,7 +368,9 @@ entities:
   account: {pattern: '\b(\d{10})\b', words: [account]}
   # name_field: tool results naming one teach the conversation its name ("Standard Savings").
   customer: {pattern: '(?i)\b(C\d{4,})\b', words: [customer], name_field: name}
-  product: {pattern: '\b([A-Z]{3}-[A-Z]{3})\b', words: [product], name_field: name}
+  # find: "the Standard Savings rate" names a product without its code; the catalogue search
+  # finds it, and it counts once the question is seen to say its name.
+  product: {pattern: '\b([A-Z]{3}-[A-Z]{3})\b', words: [product], name_field: name, find: services.search_products}
   error_code: {pattern: '\b([A-Z]\d{2,3})\b', words: [code, error]}
   loan: {pattern: '(?i)\b(LN-\d+)\b', words: [loan]}
   deposit: {pattern: '(?i)\b(FD-\d+)\b', words: [deposit, fixed deposit]}

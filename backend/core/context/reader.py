@@ -51,6 +51,14 @@ CONTINUES_INSTRUCTION = (
     "A staff member has been asking an assistant about {subject}. Is their new message about "
     '{subject} (it may call it "it"), or about something else? Choose one.'
 )
+# A procedure set aside for a side question, and a message naming nothing: asked only "more
+# about the side question?", a small model reads "carry on" as more of it. Its own two-way
+# question, with the procedure named, comes first.
+RESUMES_INSTRUCTION = (
+    "A staff member set aside a {procedure} to ask about {subject}. Does their new message ask "
+    "to go back to the {procedure} and carry on with it, or is it about something else? Choose "
+    "one."
+)
 ATTEMPTS = 2
 
 
@@ -141,6 +149,22 @@ async def continues(model: ModelProvider, text: str, subject: str) -> bool | Non
         chosen = await ask_model(model, instruction, text, options, unavailable_raises=True)
         if chosen is not None:
             return chosen == "same"
+    return None
+
+
+async def resumes(model: ModelProvider, text: str, procedure: str, subject: str) -> bool | None:
+    """Whether `text`, which names nothing, asks to go back to the paused `procedure` (True) or
+    is about something else (False); None if the model could not tell. `subject` is what staff
+    asked about since."""
+    options = [
+        Option("back", f"go back to the {procedure} and carry on with it"),
+        Option("other", "something else"),
+    ]
+    instruction = RESUMES_INSTRUCTION.format(procedure=procedure, subject=subject)
+    for _ in range(ATTEMPTS):
+        chosen = await ask_model(model, instruction, text, options, unavailable_raises=True)
+        if chosen is not None:
+            return chosen == "back"
     return None
 
 

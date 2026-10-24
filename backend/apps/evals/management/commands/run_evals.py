@@ -5,6 +5,7 @@
     python manage.py run_evals --model qwen2.5:14b     # compare another model
     python manage.py run_evals --repeat 3                # each question three times
     python manage.py run_evals --output report.json
+    python manage.py run_evals --set heldout           # each pack's evals/heldout.yaml instead
 
 Use the fake system adapters (JUTANT_BANKING_ADAPTERS=fake), so answers can be checked against
 known data. Each question is asked in a new conversation under the staff id "eval".
@@ -31,21 +32,25 @@ class Command(BaseCommand):
         parser.add_argument("--model", default="", help="the chat model to use instead")
         parser.add_argument("--output", type=Path, default=Path("evals-report.json"))
         parser.add_argument("--repeat", type=int, default=1, help="ask each question N times")
+        parser.add_argument("--set", default="", help="another question set: evals/<set>.yaml")
 
     def handle(self, *args, **options) -> None:
         only = {item.strip() for item in options["only"].split(",") if item.strip()} or None
         model = options["model"] or settings.JUTANT_LLM_MODEL
         with override_settings(JUTANT_LLM_MODEL=model):
-            report = asyncio.run(self._run(only, max(1, options["repeat"])))
+            report = asyncio.run(self._run(only, max(1, options["repeat"]), options["set"]))
         options["output"].write_text(json.dumps(report.as_dict(), indent=2), encoding="utf-8")
         self._summary(report)
         self.stdout.write(f"Report written to {options['output']}")
 
-    async def _run(self, only: set[str] | None, repeat: int) -> EvalReport:
+    async def _run(self, only: set[str] | None, repeat: int, name: str) -> EvalReport:
         runtime = build_runtime()
         await runtime.start()
         try:
-            return await run(runtime.deployment, runtime.orchestrator, only, self._progress, repeat)
+            questions = runtime.deployment.eval_set(name) if name else None
+            return await run(
+                runtime.deployment, runtime.orchestrator, only, self._progress, repeat, questions
+            )
         finally:
             await runtime.stop()
 

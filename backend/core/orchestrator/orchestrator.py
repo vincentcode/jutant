@@ -55,8 +55,17 @@ from core.context import (
     names_in,
     values_in,
 )
-from core.context.reader import Reading, ReplyAs, certain, continues, read, same_subject
-from core.errors import ModelUnavailable, PolicyDenied
+from core.context.acts import ActState, act_of, reading_for
+from core.context.reader import (
+    Reading,
+    ReplyAs,
+    certain,
+    continues,
+    read,
+    resumes,
+    same_subject,
+)
+from core.errors import FeatureUnavailable, ModelUnavailable, PolicyDenied
 from core.events import (
     ActionProposed,
     Choice,
@@ -84,7 +93,14 @@ from core.orchestrator.citations import collect
 from core.orchestrator.context import build_messages
 from core.orchestrator.timing import TimedModel, TurnTimer
 from core.playbooks.runner import Lookup, PlaybookRunner
-from core.ports import AuditSink, ConversationStore, ModelProvider, PlaybookStore, ToolClient
+from core.ports import (
+    AuditSink,
+    ConversationStore,
+    DialogueActClassifier,
+    ModelProvider,
+    PlaybookStore,
+    ToolClient,
+)
 from core.tools.gateway import ToolGateway
 from core.types import (
     Answer,
@@ -132,6 +148,8 @@ class Orchestrator:
         tool_labels: Mapping[str, str] | None = None,
         actions: ActionService | None = None,
         system_prompts: Mapping[str, str] | None = None,
+        act_classifier: DialogueActClassifier | None = None,
+        act_confidence: float = 0.8,
     ):
         self.model = model
         self.tools = tools
@@ -156,6 +174,10 @@ class Orchestrator:
         self.turn_mode = turn_mode
         self.tool_labels = dict(tool_labels or {})  # what each tool looks at, in staff's words
         self.actions = actions  # requests to send once confirmed (`core.actions`), if any
+        # How a message relates to the conversation, when a trained classifier is set: an act
+        # this sure decides; below it, the code rules and the model's questions do.
+        self.act_classifier = act_classifier
+        self.act_confidence = act_confidence
 
     async def load_tools(self) -> None:
         """Read the tool list from every MCP server. Call once at start-up."""
@@ -269,6 +291,11 @@ class Orchestrator:
             gives,
             patterned.id if patterned is not None else None,
         )
+        state = await self._act_state(conversation_id, stack)
+        if reading is None and self.act_classifier is not None:
+            reading = await self._classified(text, stack, state, turn)
+        if reading is None and not mentioned and stack.top is not None and not stack.top.procedure:
+            reading = await self._resumes(conversation_id, text, stack, turn, timer)
         if reading is None and not mentioned and stack.top is not None and not stack.top.procedure:
             reading = await self._continues(text, stack, turn, timer)
         if reading is None:
@@ -316,13 +343,16 @@ class Orchestrator:
             ):
                 yield event
             return
-        turn.set(context=reading.action, read_by=reading.by)
+        act = act_of(reading, stack)
+        turn.set(context=reading.action, act=act, read_by=reading.by)
         await self.audit.record(
             caller,
             "turn_read",
             {
                 "conversation_id": str(conversation_id),
                 "action": reading.action,
+                "act": act,  # with the question, a labelled example for an act classifier
+                "state": state.as_dict(),
                 "frame": reading.frame_id,
                 "feature_id": reading.feature_id,
                 "by": reading.by,
@@ -359,17 +389,24 @@ class Orchestrator:
             await self._audit_route(caller, conversation_id, feature, reading.by, turn)
         else:  # a new subject
             open_procedure = stack.procedure_frame()
-            feature = await self._resolve(
-                caller,
-                conversation_id,
-                text,
-                reading.feature_id,
-                turn,
-                preferred_feature_id,
-                chosen_by=reading.by if reading.feature_id and not feature_id else None,
-                # One procedure at a time: another starts only when staff lock it.
-                exclude=self._procedure_features() if open_procedure and not feature_id else (),
-            )
+            try:
+                feature = await self._resolve(
+                    caller,
+                    conversation_id,
+                    text,
+                    reading.feature_id,
+                    turn,
+                    preferred_feature_id,
+                    chosen_by=reading.by if reading.feature_id and not feature_id else None,
+                    # One procedure at a time: another starts only when staff lock it.
+                    exclude=self._procedure_features() if open_procedure and not feature_id else (),
+                )
+            except FeatureUnavailable as unavailable:
+                async for event in self._not_theirs(
+                    caller, conversation_id, text, unavailable, stored
+                ):
+                    yield event
+                return
             starts_procedure = feature.template == PROCEDURE_TEMPLATE
             if starts_procedure and (open_procedure := stack.procedure_frame()) is not None:
                 async for event in self._stop_quietly(
@@ -509,6 +546,23 @@ class Orchestrator:
         yield TextDelta(WHICH)
         yield asked
         yield Completed(Answer(WHICH, "", (), ()))
+
+    async def _not_theirs(
+        self,
+        caller: Caller,
+        conversation_id: UUID,
+        text: str,
+        unavailable: FeatureUnavailable,
+        stored: bool,
+    ) -> AsyncIterator[Event]:
+        """Tell staff the kind of help they asked for is not theirs, and whose it is. Written in
+        code; nothing is looked up and the conversation's subjects are unchanged."""
+        said = not_theirs(unavailable)
+        if not stored:
+            await self.conversations.append(conversation_id, Message("user", text))
+        await self.conversations.append(conversation_id, Message("assistant", said))
+        yield TextDelta(said)
+        yield Completed(Answer(said, "", (), ()))
 
     async def _audit_clarify(self, caller: Caller, conversation_id: UUID, asked: Clarify) -> None:
         """What staff were asked to pick from, and why: `report_turns` reads it."""
@@ -854,6 +908,49 @@ class Orchestrator:
         had = {k: v for k, v in frame.details.items() if k != ASKED}
         return update(feature, frame.details, text, mentioned) != had
 
+    async def _act_state(self, conversation_id: UUID, stack: ContextStack) -> ActState:
+        """What an act classifier knows besides the message (`core.context.acts`)."""
+        top, procedure = stack.top, stack.procedure_frame()
+        current = await self.runner.current(conversation_id) if procedure is not None else None
+        subject = None
+        if top is not None and not top.procedure:
+            subject = self._describe(top, None, stack).split(": ", 1)[-1]
+        return ActState(
+            subject,
+            current[0] if current is not None else None,
+            procedure is not None and procedure is top,
+        )
+
+    async def _classified(
+        self, text: str, stack: ContextStack, state: ActState, turn: Trace
+    ) -> Reading | None:
+        """The act classifier's reading, when it is sure and its act says which subject."""
+        assert self.act_classifier is not None
+        with turn.span("act?", "chain") as span:
+            decided = await self.act_classifier.act(text, state)
+            span.set(act=decided[0] if decided else None, sure=decided[1] if decided else None)
+        if decided is None or decided[1] < self.act_confidence:
+            return None
+        return reading_for(decided[0], stack)
+
+    async def _resumes(
+        self, conversation_id: UUID, text: str, stack: ContextStack, turn: Trace, timer: TurnTimer
+    ) -> Reading | None:
+        """A message naming nothing while a procedure waits below the subject on top: back to
+        the procedure? A two-way question; None (something else, or unclear) reads on."""
+        procedure = stack.procedure_frame()
+        current = await self.runner.current(conversation_id) if procedure is not None else None
+        if procedure is None or current is None or stack.top is None:
+            return None
+        title = f"{current[0]} procedure"  # "Failed transfer procedure"
+        subject = self._describe(stack.top, None, stack).split(": ", 1)[-1]
+        with turn.span("resume?", "chain", procedure=title) as span:
+            back = await resumes(
+                TimedModel(TracedModel(self.model, span), timer), text, title, subject
+            )
+            span.set(back=back)
+        return Reading("return", procedure.id, by="model:resumes") if back else None
+
     async def _continues(
         self, text: str, stack: ContextStack, turn: Trace, timer: TurnTimer
     ) -> Reading | None:
@@ -1044,6 +1141,11 @@ class Orchestrator:
                 )
             feature = route.feature
             detail["chosen_by"] = route.by  # pattern, meaning, model... to find misroutes
+            if route.by == "unavailable":
+                await self.audit.record(
+                    caller, "feature_unavailable", {**detail, "feature_id": feature.id}
+                )
+                raise FeatureUnavailable(feature.id, feature.title, feature.roles, feature.pack)
             if prefer:
                 detail["preferred"] = prefer
             if route.score is not None:
@@ -1267,3 +1369,14 @@ async def _then(first: AsyncIterator[Event], second: AsyncIterator[Event]) -> As
 
 def _timing(timer: TurnTimer) -> dict[str, int]:
     return {f"timing.{name}": value for name, value in timer.as_detail().items()}
+
+
+def not_theirs(unavailable: FeatureUnavailable) -> str:
+    """ "Customer 360 is only for customer service or branch manager staff...": the roles that
+    may use it, or else the pack it belongs to."""
+    roles = [role.replace("_", " ") for role in unavailable.roles]
+    if roles:
+        who = roles[0] if len(roles) == 1 else f"{', '.join(roles[:-1])} or {roles[-1]}"
+        return f"{unavailable.title} is only for {who} staff, so I can't help with that here."
+    area = unavailable.pack or "another area's"
+    return f"{unavailable.title} is {area} help, which your account does not include."

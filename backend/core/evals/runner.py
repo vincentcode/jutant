@@ -10,12 +10,19 @@ question with `prefer` is asked with that quick action chosen.
 """
 
 import time
-from collections.abc import Callable
-from typing import TYPE_CHECKING
+from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING, Any
 
 from core.errors import PolicyDenied
 from core.evals.scoring import EvalQuestion, EvalReport, QuestionResult, score
-from core.events import Completed, Failed, FeatureSelected, ToolFinished, ToolStarted
+from core.events import (
+    Completed,
+    Failed,
+    FeatureSelected,
+    PlaybookStepShown,
+    ToolFinished,
+    ToolStarted,
+)
 from core.packs.deployment import Deployment
 from core.packs.loader import Pack
 from core.types import Caller, PackRole
@@ -32,16 +39,18 @@ async def run(
     only: set[str] | None = None,
     progress: Callable[[QuestionResult], None] | None = None,
     repeat: int = 1,
+    questions: Sequence[dict[str, Any]] | None = None,
 ) -> EvalReport:
     """Ask every eval question (or those whose id or feature is in `only`) `repeat` times and
-    score each answer. The model's answers vary between runs, so one pass can be luck."""
+    score each answer. The model's answers vary between runs, so one pass can be luck.
+    `questions`: another set to ask instead of the pack's own (`Deployment.eval_set`)."""
     report = EvalReport(model=getattr(orchestrator.model, "model", ""))
     others = (
         {p.manifest.name: p.manifest.roles[0] for p in pack.packs if p.manifest.roles}
         if isinstance(pack, Deployment) and len(pack.packs) > 1
         else {}
     )
-    for data in pack.eval_questions:
+    for data in pack.eval_questions if questions is None else questions:
         question = EvalQuestion.from_dict(data)
         if only and question.id not in only and question.feature not in only:
             continue
@@ -85,8 +94,16 @@ async def ask(
                     result.tools_called.append(call.name)
                 case ToolFinished(tool_result) if tool_result.ok:
                     data_reached_caller = True
+                case PlaybookStepShown(step=step):
+                    # a procedure's step is the answer (going back to it shows its step again),
+                    # given by the feature that started it
+                    shown = f"{step.title}: {step.instruction}"
+                    result.answer = f"{result.answer} {shown}".strip()
+                    if result.routed_to is None:
+                        run = await orchestrator.playbooks.get_run(conversation_id)
+                        result.routed_to = run.feature_id if run is not None else None
                 case Completed(answer):
-                    result.answer = answer.text
+                    result.answer = answer.text or result.answer
                     result.citations = len(answer.citations)
                 case Failed(reason):
                     result.failed = reason

@@ -9,6 +9,15 @@ class PolicyDenied(JutantError):
     """The policy engine refused a tool call."""
 
 
+class FeatureUnavailable(PolicyDenied):
+    """A question clearly for a kind of help the caller may not use: staff are told whose it
+    is, and nothing is looked up."""
+
+    def __init__(self, feature_id: str, title: str, roles: tuple[str, ...], pack: str) -> None:
+        super().__init__(f"{feature_id} is not available to the caller")
+        self.feature_id, self.title, self.roles, self.pack = feature_id, title, roles, pack
+
+
 class InvalidToolCall(JutantError):
     """A tool call is not permitted for the feature or fails its schema."""
 

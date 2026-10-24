@@ -110,3 +110,13 @@ def test_an_unscoped_name_from_before_still_finds_its_feature() -> None:
     registry = FeatureRegistry(both().features)
     assert registry.get("card_lookup").id == "banking.card_lookup"
     assert registry.get("conversation").id == "conversation"
+
+
+def test_a_held_out_set_is_scoped_like_the_packs_own_questions() -> None:
+    joined = both()
+    heldout = joined.eval_set("heldout")
+    assert heldout and all(q["pack"] == "banking" for q in heldout)
+    assert {q["feature"] for q in heldout} >= {"banking.product_lookup", "banking.customer_360"}
+    assert not {q["id"] for q in heldout} & {q["id"] for q in joined.eval_questions}
+    assert joined.eval_set("") == joined.eval_questions
+    assert joined.eval_set("no_such_set") == ()

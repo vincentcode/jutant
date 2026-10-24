@@ -190,3 +190,65 @@ def test_an_invented_fact_fails_the_answer() -> None:
     )
     assert invented.checks["no_invention"] is False and not invented.passed
     assert honest.checks["no_invention"] is True and honest.passed
+
+
+async def test_another_set_is_asked_instead_of_the_packs_own_questions() -> None:
+    other = {**POLICY_Q, "id": "h1", "feature": "transaction_lookup", "expect_tool": None}
+    model = FakeModel(
+        replies=[ModelReply("transaction_lookup"), ModelReply("Fine."), ModelReply("Fine.")]
+    )
+    rig = await make_rig(model, results={"transactions.get_status": record_result("T", "1", {})})
+    report = await run(pack(POLICY_Q), rig.orchestrator, questions=[other])
+    assert [r.question.id for r in report.results] == ["h1"]
+
+
+def test_a_refusal_can_be_held_to_what_it_tells_staff() -> None:
+    question = EvalQuestion(
+        "h",
+        "customer_360",
+        "teller",
+        "Overview of C1001",
+        expect_denied=True,
+        expect_contains=("customer service",),
+    )
+    silent = score(
+        QuestionResult(question, "account_services", answer="Which account?", refused=True)
+    )
+    told = score(
+        QuestionResult(
+            question,
+            None,
+            answer="Customer summaries are for customer service staff.",
+            refused=True,
+        )
+    )
+    assert silent.checks == {"refused": True, "contains": False} and not silent.passed
+    assert told.passed
+
+
+async def test_a_procedure_step_shown_is_the_turns_answer() -> None:
+    """Going back to a paused procedure answers with its step, not text: scored as the
+    procedure's feature answering, with the step's words."""
+    model = FakeModel(
+        replies=[
+            ModelReply("troubleshooting"),  # routing "my card is blocked"
+            ModelReply("done"),  # "customer verified": step 1 done
+            ModelReply("policy_qa"),  # a side question
+            ModelReply(None, (ToolCall("1", "documents.search", {"query": "joint"}),)),
+            ModelReply("Photo ID and proof of address."),
+            ModelReply("back"),  # "carry on": back to the procedure
+        ]
+    )
+    rig = await make_rig(model, results={"documents.search": doc_result("KYC Policy", "4.2")})
+    question = {
+        "id": "u1",
+        "feature": "troubleshooting",
+        "role": "teller",
+        "before": ["my card is blocked", "customer verified", "KYC for joint accounts?"],
+        "question": "carry on",
+        "expect_contains": ["which reason"],
+    }
+
+    [result] = (await run(pack(question), rig.orchestrator)).results
+
+    assert result.routed_to == "troubleshooting" and result.passed, (result.answer, result.checks)

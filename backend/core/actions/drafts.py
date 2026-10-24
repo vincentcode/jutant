@@ -2,7 +2,8 @@
 
 A propose tool answers `{"summary", "fields": [{"label", "value"}], "submit": {...}, "notes",
 "warnings"}` when the request can be made, or anything without `submit` (`{"refused": "You have
-3 days left"}`) when it cannot: that goes back to the model to explain, and no card is shown.
+3 days left"}`) when it cannot, and no card is shown. A refusal to a call the model made goes
+back to it to explain; to a call made in code, it is the answer as it stands.
 A perform tool answers `{"reference": "LV-2026-00318", "status": "Waiting for your manager"}`.
 
 Whatever a server sends is bounded here, so a card can never carry more than it can show.
@@ -33,6 +34,11 @@ def read_draft(data: Any) -> Draft | None:
         notes=_lines(data.get("notes")),
         warnings=_lines(data.get("warnings")),
     )
+
+
+def read_refusal(data: Any) -> str:
+    """Why a propose tool proposed nothing (`{"refused": "..."}`), or "" if it gave no reason."""
+    return _text(data.get("refused")) if isinstance(data, dict) else ""
 
 
 def read_outcome(data: Any) -> tuple[str, str]:

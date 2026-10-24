@@ -1,3 +1,4 @@
+from dataclasses import replace
 from uuid import uuid4
 
 import pytest
@@ -8,6 +9,7 @@ from core.orchestrator.orchestrator import NO_SOURCE_MESSAGE
 from core.types import Caller, Citation, Message, ModelReply, ToolCall
 from providers.llm.fake import FakeModel
 from tests.builders import (
+    FEATURES,
     collect_events,
     doc_result,
     final_answer,
@@ -242,3 +244,22 @@ async def test_audit_trail_for_a_turn() -> None:
 
 def test_teller_helper_is_a_staff_caller() -> None:
     assert teller() == Caller("S001", "teller", "staff", {"branch": "ACC-01"})
+
+
+async def test_a_question_for_a_feature_the_role_may_not_use_is_told_whose_it_is() -> None:
+    features = tuple(
+        replace(f, route_patterns=(r"\bC\d{4}\b",)) if f.id == "customer_360" else f
+        for f in FEATURES
+    )
+    rig = await make_rig(FakeModel(), features=features)
+    conversation = await rig.conversations.create(teller())
+    events = await collect_events(
+        rig.orchestrator.ask(teller(), conversation, "Give me an overview of customer C1001")
+    )
+    assert isinstance(events[-1], Completed)
+    assert events[-1].answer.text == (
+        "Customer 360 is only for branch manager staff, so I can't help with that here."
+    )
+    assert rig.tools.calls == [] and rig.model.calls == []
+    assert (await rig.conversations.context(conversation) or {}).get("frames", []) == []
+    assert "feature_unavailable" in rig.audit.names()

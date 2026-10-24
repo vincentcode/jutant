@@ -41,6 +41,9 @@ class Pack:
     rules: tuple[Rule, ...]
     field_rules: tuple[FieldRule, ...]
     eval_questions: tuple[dict[str, Any], ...] = ()
+    # Other question sets in evals/ (`heldout.yaml` -> "heldout"), run only when asked for:
+    # questions kept out of tuning, to show whether a change generalises.
+    eval_sets: tuple[tuple[str, tuple[dict[str, Any], ...]], ...] = ()
 
     @property
     def actions(self) -> tuple[Action, ...]:
@@ -52,7 +55,7 @@ class Pack:
     @property
     def entity_types(self) -> tuple[EntityType, ...]:
         return tuple(
-            EntityType(name, e.pattern, tuple(e.words), e.name_field)
+            EntityType(name, e.pattern, tuple(e.words), e.name_field, e.find)
             for name, e in self.manifest.entities.items()
         )
 
@@ -119,6 +122,11 @@ def load_pack(path: str | Path) -> Pack:
     playbooks = tuple(_playbook(_read_yaml(p)) for p in sorted((root / "playbooks").glob("*.yaml")))
     questions_file = root / "evals" / "questions.yaml"
     questions = _read_yaml(questions_file) if questions_file.exists() else []
+    sets = tuple(
+        (path.stem, tuple(_read_yaml(path) or ()))
+        for path in sorted((root / "evals").glob("*.yaml"))
+        if path != questions_file
+    )
     return Pack(
         path=root,
         manifest=manifest,
@@ -128,6 +136,7 @@ def load_pack(path: str | Path) -> Pack:
         rules=tuple(policy.RULES),
         field_rules=field_rules,
         eval_questions=tuple(questions or ()),
+        eval_sets=sets,
     )
 
 
