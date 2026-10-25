@@ -37,12 +37,14 @@ class OllamaProvider:
         num_ctx: int = 8192,
         temperature: float = 0.1,
         timeout_s: int = 300,
+        think: bool | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ):
         self.model = model
         self.embed_model = embed_model
         self.num_ctx = num_ctx
         self.temperature = temperature
+        self.think = think
         self._http = httpx.AsyncClient(
             base_url=base_url.rstrip("/"), timeout=timeout_s, transport=transport
         )
@@ -109,6 +111,8 @@ class OllamaProvider:
         }
         if tools:
             body["tools"] = [_tool_to_wire(t) for t in tools]
+        if self.think is not None:
+            body["think"] = self.think
         return body
 
     async def embed(self, texts: list[str]) -> list[list[float]]:

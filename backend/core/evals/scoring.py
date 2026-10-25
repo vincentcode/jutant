@@ -4,14 +4,19 @@ Each question is scored on the checks it asks for:
 
 - routed: the router chose the expected feature (the question is asked with no feature picked);
 - tool: the expected tool was called;
-- contains: every expected phrase appears in the answer (ignoring case);
+- contains: every expected phrase appears in the answer (ignoring case and thousands separators,
+  so 4230.00 matches GHS 4,230.00); an expected fact given as a list passes on any of its phrasings;
 - cited: the answer has at least one source, when a citation is expected;
 - refused: when the question should be refused, no data from the feature's tools reached the
   answer (the feature was not offered, or its tool call was denied).
 """
 
+import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
+
+THOUSANDS = re.compile(r"(?<=\d),(?=\d{3})")
 
 
 @dataclass(frozen=True)
@@ -22,11 +27,12 @@ class EvalQuestion:
     question: str
     attributes: dict[str, Any] = field(default_factory=dict)
     expect_tool: str | None = None
-    expect_contains: tuple[str, ...] = ()
+    expect_contains: tuple[str | tuple[str, ...], ...] = ()  # a tuple: any of its phrasings
     expect_absent: tuple[str, ...] = ()  # phrases a correct answer must not state (an invention)
     expect_citation: bool = False
     expect_denied: bool = False
     before: tuple[str, ...] = ()  # asked first in the same conversation, unscored: a follow-up
+    then: tuple[str, ...] = ()  # replies to what the assistant asks back, such as the channel
     prefer: str | None = None  # the quick action staff chose, which the question may override
     pack: str = ""  # the pack whose question it is: its role is the role there
 
@@ -39,11 +45,15 @@ class EvalQuestion:
             question=str(data["question"]),
             attributes=dict(data.get("attributes") or {}),
             expect_tool=data.get("expect_tool"),
-            expect_contains=tuple(data.get("expect_contains") or ()),
+            expect_contains=tuple(
+                tuple(str(p) for p in fact) if isinstance(fact, list) else str(fact)
+                for fact in data.get("expect_contains") or ()
+            ),
             expect_absent=tuple(data.get("expect_absent") or ()),
             expect_citation=bool(data.get("expect_citation")),
             expect_denied=bool(data.get("expect_denied")),
             before=tuple(str(b) for b in data.get("before") or ()),
+            then=tuple(str(t) for t in data.get("then") or ()),
             prefer=data.get("prefer"),
             pack=str(data.get("pack") or ""),
         )
@@ -73,16 +83,14 @@ def score(result: QuestionResult) -> QuestionResult:
     if q.expect_denied:
         checks["refused"] = result.refused
         if q.expect_contains:  # what the refusal tells staff, such as who may use it
-            text = result.answer.lower()
-            checks["contains"] = all(phrase.lower() in text for phrase in q.expect_contains)
+            checks["contains"] = contains_all(result.answer, q.expect_contains)
     else:
         checks["routed"] = result.routed_to == q.feature
         checks["answered"] = result.failed is None
         if q.expect_tool:
             checks["tool"] = q.expect_tool in result.tools_called
         if q.expect_contains:
-            text = result.answer.lower()
-            checks["contains"] = all(phrase.lower() in text for phrase in q.expect_contains)
+            checks["contains"] = contains_all(result.answer, q.expect_contains)
         if q.expect_absent:
             text = result.answer.lower()
             checks["no_invention"] = not any(phrase.lower() in text for phrase in q.expect_absent)
@@ -90,6 +98,18 @@ def score(result: QuestionResult) -> QuestionResult:
             checks["cited"] = result.citations > 0
     result.checks = checks
     return result
+
+
+def contains_all(answer: str, facts: Sequence[str | tuple[str, ...]]) -> bool:
+    text = _plain(answer)
+    return all(
+        any(_plain(p) in text for p in (fact if isinstance(fact, tuple) else (fact,)))
+        for fact in facts
+    )
+
+
+def _plain(text: str) -> str:
+    return THOUSANDS.sub("", text.lower())
 
 
 @dataclass

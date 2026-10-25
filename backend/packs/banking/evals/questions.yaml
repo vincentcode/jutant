@@ -48,6 +48,7 @@
   role: teller
   attributes: {branch: ACC-01}
   question: "Why did transfer TX-0002 fail?"
+  then: ["Not sure"]  # the channel, asked first
   expect_tool: transactions.get_status
   expect_contains: ["closed"]
   expect_citation: true
@@ -57,6 +58,7 @@
   role: teller
   attributes: {branch: ACC-01}
   question: "Show the last two transactions on account 0011223344."
+  then: ["Not sure"]  # the channel, asked first
   expect_tool: transactions.list
   expect_contains: ["TX-0003"]
   expect_citation: true
@@ -170,6 +172,7 @@
   role: teller
   attributes: {branch: ACC-01}
   question: "Has transfer TX-0099 gone through?"
+  then: ["Not sure"]  # the channel, asked first
   expect_tool: transactions.get_status
   expect_contains: ["could not find"]  # no such transfer: nothing may be invented
   expect_citation: false
@@ -189,7 +192,7 @@
   attributes: {branch: ACC-01}
   question: "What does E12 mean?"
   expect_tool: documents.search
-  expect_contains: ["insufficient"]
+  expect_contains: [["insufficient", "not enough", "not have enough"]]
   expect_citation: true
 
 - id: q22
@@ -274,7 +277,7 @@
   feature: transaction_lookup
   role: teller
   attributes: {branch: ACC-01}
-  before: ["What is the status of transfer TX-0002?"]
+  before: ["What is the status of transfer TX-0002?", "Not sure"]  # then the channel
   question: "Why did it fail?"
   expect_tool: transactions.get_status  # the reference comes from the previous question
   expect_contains: ["closed"]
@@ -296,7 +299,9 @@
   attributes: {branch: ACC-01}
   prefer: transaction_lookup
   question: "Why did the transfer fail?"
-  expect_contains: ["reference"]  # asks which transfer, rather than "no source found"
+  then: ["Not sure"]  # the channel, asked first
+  # asks which transfer, rather than "no source found": by name or by offering the ways to find it
+  expect_contains: [["reference", "how would you like to find it"]]
 
 - id: q34
   feature: policy_qa
@@ -315,7 +320,7 @@
   feature: transaction_lookup
   role: teller
   attributes: {branch: ACC-01}
-  before: ["Why did transfer TX-0002 fail?"]
+  before: ["Why did transfer TX-0002 fail?", "Not sure"]  # then the channel
   question: "Was it reversed to the sender?"
   expect_tool: transactions.get_status
   expect_contains: ["does not show"]
@@ -327,7 +332,7 @@
   role: teller
   attributes: {branch: ACC-01}
   # The reference is two questions back: neither this question nor the last one names it.
-  before: ["Why did transfer TX-0002 fail?", "Was it reversed to the sender?"]
+  before: ["Why did transfer TX-0002 fail?", "Not sure", "Was it reversed to the sender?"]
   question: "Why was it not reversed to the sender?"
   expect_tool: transactions.get_status
   expect_contains: ["does not show"]

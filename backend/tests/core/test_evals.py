@@ -252,3 +252,46 @@ async def test_a_procedure_step_shown_is_the_turns_answer() -> None:
     [result] = (await run(pack(question), rig.orchestrator)).results
 
     assert result.routed_to == "troubleshooting" and result.passed, (result.answer, result.checks)
+
+
+async def test_replies_follow_the_question_and_the_last_answer_is_scored() -> None:
+    model = FakeModel(
+        replies=[
+            ModelReply("transaction_lookup"),  # routing the question
+            ModelReply("It failed."),  # nudge: no tool call yet
+            ModelReply("It failed."),
+            ModelReply("other"),  # the reply: not more about the transfer
+            ModelReply("policy_qa"),
+            ModelReply(None, (ToolCall("1", "documents.search", {"query": "joint"}),)),
+            ModelReply("Each holder needs photo ID and proof of address."),
+        ]
+    )
+    rig = await make_rig(model, results={"documents.search": doc_result("KYC Policy", "4.2")})
+    question = {
+        **POLICY_Q,
+        "feature": "transaction_lookup",
+        "question": "What happened to my transfer?",
+        "then": ["KYC for joint accounts?"],
+    }
+
+    [result] = (await run(pack(question), rig.orchestrator)).results
+
+    assert result.routed_to == "transaction_lookup"  # where the question went, not the reply
+    assert result.tools_called == ["documents.search"]  # every scored turn's calls
+    assert result.passed, (result.answer, result.checks)
+
+
+def test_numbers_match_with_thousands_separators_and_facts_with_any_phrasing() -> None:
+    question = EvalQuestion.from_dict(
+        {
+            "id": "q",
+            "feature": "loans",
+            "role": "teller",
+            "question": "How far behind?",
+            "expect_contains": ["4230.00", ["insufficient", "not enough"]],
+        }
+    )
+    right = score(QuestionResult(question, "loans", answer="Arrears of GHS 4,230.00: not enough."))
+    wrong = score(QuestionResult(question, "loans", answer="Arrears of GHS 4,230.00."))
+    assert right.passed
+    assert wrong.checks["contains"] is False

@@ -175,3 +175,19 @@ async def test_stream_chat_releases_text_that_only_looked_like_a_call() -> None:
 async def test_failures_raise_model_unavailable(handler) -> None:
     with pytest.raises(ModelUnavailable):
         await provider(handler).chat([Message("user", "hi")], [])
+
+
+async def test_think_is_sent_only_when_set() -> None:
+    seen: list[dict[str, Any]] = []
+    await provider(replying({"content": "Hi."}, seen)).chat([Message("user", "Hi")], [])
+    thinking = OllamaProvider(
+        base_url="http://ollama:11434",
+        model="qwen3.5:9b",
+        embed_model="nomic-embed-text",
+        think=False,
+        transport=httpx.MockTransport(replying({"content": "Hi."}, seen)),
+    )
+    await thinking.chat([Message("user", "Hi")], [])
+
+    assert "think" not in seen[0]
+    assert seen[1]["think"] is False
