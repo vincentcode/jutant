@@ -86,7 +86,7 @@ features:
     template: document_qa
     title: HR policies
     suggestions: ["How many days of compassionate leave can I take?"]
-    description: "What the HR policies say: kinds of leave and their rules, working hours, overtime, benefits, conduct."
+    description: "What the HR policies say: kinds of leave, how many days each allows and their rules, working hours, overtime, benefits, conduct."
     prompt: prompts/hr_policy_qa.md
     tools: [documents.search]
     route:
@@ -94,6 +94,9 @@ features:
         - "What does the policy say about working from home?"
         - "Is overtime paid or given as time off?"
         - "Who is eligible for the medical benefit?"
+        - "How many days of maternity leave does the policy allow?"
+        - "What is the entitlement for study leave?"
+        - "How many days off does the policy give for a wedding?"
 
   - id: my_leave
     template: record_lookup
