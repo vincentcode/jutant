@@ -17,5 +17,6 @@ def build(settings: Any) -> ModelProvider:
             num_ctx=settings.JUTANT_LLM_NUM_CTX,
             temperature=settings.JUTANT_LLM_TEMPERATURE,
             timeout_s=settings.JUTANT_LLM_TIMEOUT_S,
+            think=getattr(settings, "JUTANT_LLM_THINK", None),
         )
     raise ValueError(f"Unknown JUTANT_LLM_PROVIDER: {provider}")

@@ -139,6 +139,9 @@ JUTANT_LLM_BASE_URL = env("JUTANT_LLM_BASE_URL", "http://localhost:11434")
 JUTANT_LLM_NUM_CTX = int(env("JUTANT_LLM_NUM_CTX", "8192"))
 JUTANT_LLM_TEMPERATURE = float(env("JUTANT_LLM_TEMPERATURE", "0.1"))
 JUTANT_LLM_TIMEOUT_S = int(env("JUTANT_LLM_TIMEOUT_S", "300"))
+# Reasoning models (qwen3.5): "false" skips the thinking pass. Unset sends nothing, for models
+# without one (qwen2.5), which reject the flag.
+JUTANT_LLM_THINK = {"true": True, "false": False}.get(env("JUTANT_LLM_THINK", "").lower())
 JUTANT_EMBED_MODEL = env("JUTANT_EMBED_MODEL", "nomic-embed-text")
 JUTANT_EMBED_DIM = int(env("JUTANT_EMBED_DIM", "768"))
 # Task prefixes the embedding model was trained with (these are nomic-embed-text's); empty for
