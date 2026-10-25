@@ -106,7 +106,7 @@ features:
     template: document_qa
     title: Policy and procedure Q&A
     suggestions: ["What ID do joint account holders need?"]  # offered on the first screen; must be answerable
-    description: "Rules in the bank's policies and procedures: what ID or documents a customer must provide, KYC, account rules, compliance."
+    description: "Rules in the bank's policies and procedures: what ID or documents a customer must provide, KYC, account rules (such as accounts for minors), compliance."
     prompt: prompts/policy_qa.md
     tools: [documents.search]
     route:
@@ -117,6 +117,8 @@ features:
         - "Is a voter ID accepted as proof of identity?"
         - "How recent must a utility bill be for proof of address?"
         - "What are the KYC rules for foreign nationals?"
+        - "Can a 16-year-old open a savings account on their own?"
+        - "Who signs for an account held by a child?"
     prefetch:
       - tool: documents.search
         arguments: {query: {question: true}}
@@ -141,7 +143,7 @@ features:
     template: record_lookup
     title: Transaction lookup
     suggestions: ["Why did transfer TX-0002 fail?"]  # offered on the first screen; must be answerable
-    description: "One account's transactions, or one transfer by its reference: activity, status, why it failed."
+    description: "One account's transactions (credits and debits), or one transfer by its reference: activity, status, why it failed."
     prompt: prompts/transaction_lookup.md
     # TRIAL: staff are guided to what the lookup needs: the channel, then how to find it.
     # Every channel is searched in core banking until the other systems are connected.
@@ -166,6 +168,8 @@ features:
         - "Has the salary been credited to this account yet?"
         - "What is the status of the transfer the customer made yesterday?"
         - "List the recent debits on the customer's account."
+        - "Which payments came into the customer's account this month?"
+        - "Show the incoming transfers on this account."
     prefetch:
       - tool: transactions.get_status
         arguments: {reference: {detail: reference}}
@@ -262,7 +266,7 @@ features:
     template: record_lookup
     title: Account status and services
     suggestions: ["Why can't the customer take money out of account 0011223344?"]  # must be answerable
-    description: "One account's status and services: holds, liens and blocks, why money cannot leave it, its signatories and mandate, charges and fees, standing orders, cheques."
+    description: "One account's status and services: holds, liens and blocks, why money cannot leave it, its signatories and mandate, charges and fees, standing orders and direct debits (and why one failed), cheques."
     prompt: prompts/account_services.md
     tools:
       - accounts.get_status
@@ -284,6 +288,7 @@ features:
         - "Is there a lien on this account?"
         - "Who are the signatories and how many must sign?"
         - "Why did the customer's standing order not go through?"
+        - "A direct debit on the account was rejected. Why?"
         - "What is this fee taken from the account?"
         - "Was the cheque paid or returned?"
     # One of the account's records, the one the question is about (`when`); a cheque return

@@ -163,6 +163,7 @@
   role: teller
   attributes: {branch: ACC-01}
   question: "Show the credits on account 0011223355."
+  then: ["Not sure"]  # the channel, asked first
   expect_tool: transactions.list
   expect_contains: ["TX-0004"]
   expect_citation: true
